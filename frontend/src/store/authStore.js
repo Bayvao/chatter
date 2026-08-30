@@ -62,6 +62,10 @@ export const useAuthStore = create((set) => ({
     }
   },
 
+  setUser(updater) {
+    set((state) => ({ user: typeof updater === 'function' ? updater(state.user) : updater }));
+  },
+
   logout() {
     localStorage.removeItem(TOKEN_KEY);
     setAuthToken(null);

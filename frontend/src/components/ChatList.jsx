@@ -28,6 +28,12 @@ export default function ChatList() {
     setResults([]);
   };
 
+  const addContact = async (userId) => {
+    // 409 just means they are already a contact, which is not worth surfacing.
+    await api.post(`/api/users/me/contacts/${userId}`).catch(() => {});
+    setResults(results.filter((user) => user.id !== userId));
+  };
+
   return (
     <aside className="chat-list">
       <form className="search" onSubmit={onSearch}>
@@ -49,6 +55,9 @@ export default function ChatList() {
               <button type="button" onClick={() => startChat(user.id)}>
                 {user.displayName}
                 <span className="muted"> @{user.username}</span>
+              </button>
+              <button type="button" className="link add-contact" onClick={() => addContact(user.id)}>
+                Add contact
               </button>
             </li>
           ))}

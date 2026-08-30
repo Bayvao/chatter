@@ -1,15 +1,19 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useAuthStore } from '../store/authStore';
 import { useChatStore } from '../store/chatStore';
 import websocket from '../services/websocket';
 import ChatList from './ChatList';
+import ContactList from './ContactList';
 import MessageBubble from './MessageBubble';
 import MessageInput from './MessageInput';
+import Profile from './Profile';
 
 export default function ChatWindow() {
   const { user, token, logout } = useAuthStore();
   const { chats, activeChatId, messages, loadingMessages, loadChats, receiveMessage, reset } = useChatStore();
   const bottomRef = useRef(null);
+  const [sidebarTab, setSidebarTab] = useState('chats');
+  const [showProfile, setShowProfile] = useState(false);
 
   useEffect(() => {
     loadChats();
@@ -54,18 +58,44 @@ export default function ChatWindow() {
         <span className="brand">Chatter</span>
         <span className="spacer" />
         <span className="muted">{user?.displayName ?? user?.username}</span>
+        <button type="button" className="link" onClick={() => setShowProfile((open) => !open)}>
+          {showProfile ? 'Back to chat' : 'Profile'}
+        </button>
         <button type="button" className="link" onClick={onLogout}>
           Sign out
         </button>
       </header>
 
       <div className="app-body">
-        <ChatList />
+        <aside className="sidebar">
+          <div className="tabs">
+            <button
+              type="button"
+              className={sidebarTab === 'chats' ? 'active' : ''}
+              onClick={() => setSidebarTab('chats')}
+            >
+              Chats
+            </button>
+            <button
+              type="button"
+              className={sidebarTab === 'contacts' ? 'active' : ''}
+              onClick={() => setSidebarTab('contacts')}
+            >
+              Contacts
+            </button>
+          </div>
+
+          {sidebarTab === 'chats' ? <ChatList /> : <ContactList />}
+        </aside>
 
         <main className="conversation">
-          {!activeChatId && <div className="placeholder">Pick a conversation, or search for someone.</div>}
+          {showProfile && <Profile onClose={() => setShowProfile(false)} />}
 
-          {activeChatId && (
+          {!showProfile && !activeChatId && (
+            <div className="placeholder">Pick a conversation, or search for someone.</div>
+          )}
+
+          {!showProfile && activeChatId && (
             <>
               <div className="conversation-header">
                 {activeChat?.title ?? activeChat?.otherUserName ?? 'Conversation'}
