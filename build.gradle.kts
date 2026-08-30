@@ -12,6 +12,14 @@ java {
 	targetCompatibility = JavaVersion.VERSION_17
 }
 
+tasks.withType<JavaCompile> {
+	// sourceCompatibility/targetCompatibility only set the bytecode version;
+	// they don't stop code from calling APIs added after 17 when compiled
+	// with a newer JDK. --release enforces the actual JDK 17 API surface,
+	// which is what CI (running on a real JDK 17) will reject anyway.
+	options.release.set(17)
+}
+
 repositories {
 	mavenCentral()
 }
