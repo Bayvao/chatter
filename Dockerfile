@@ -6,7 +6,17 @@ WORKDIR /workspace
 # independently of source changes.
 COPY gradlew settings.gradle.kts build.gradle.kts ./
 COPY gradle gradle
-RUN ./gradlew --no-daemon dependencies > /dev/null 2>&1 || true
+
+# A Windows checkout can hand us CRLF line endings and no exec bit. CRLF makes
+# the kernel look for an interpreter named "/bin/sh\r", which fails as exit 127.
+# .gitattributes prevents this for fresh clones; this keeps existing working
+# copies building too.
+RUN sed -i 's/\r$//' gradlew && chmod +x gradlew
+
+# Warm the dependency cache separately from the sources. Failures here are not
+# fatal (the real build below reports them), but they are logged rather than
+# silenced so a broken step is diagnosable.
+RUN ./gradlew --no-daemon dependencies || true
 
 COPY src src
 RUN ./gradlew --no-daemon clean bootJar -x test

@@ -1,0 +1,17 @@
+# Normalise line endings so a Windows checkout cannot rewrite shell scripts to
+# CRLF. `gradlew` with CRLF makes the kernel look for an interpreter literally
+# named "/bin/sh\r", which fails inside the Docker build with exit code 127.
+* text=auto eol=lf
+
+# Windows scripts must keep CRLF to run under cmd.exe.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Never touch binaries.
+*.jar binary
+*.png binary
+*.jpg binary
+*.gif binary
+*.ico binary
+*.woff binary
+*.woff2 binary
