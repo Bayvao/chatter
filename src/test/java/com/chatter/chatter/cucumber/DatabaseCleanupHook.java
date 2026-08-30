@@ -27,6 +27,8 @@ public class DatabaseCleanupHook {
         jdbcTemplate.execute("DELETE FROM chat.chat_participants");
         jdbcTemplate.execute("DELETE FROM chat.chat_counters");
         jdbcTemplate.execute("DELETE FROM chat.chats");
+        jdbcTemplate.execute("DELETE FROM app_user.contacts");
+        jdbcTemplate.execute("DELETE FROM app_user.user_profiles");
         jdbcTemplate.execute("DELETE FROM app_user.users");
     }
 
