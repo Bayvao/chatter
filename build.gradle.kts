@@ -16,9 +16,17 @@ repositories {
 	mavenCentral()
 }
 
+extra["cucumberVersion"] = "7.34.7"
+extra["junit-jupiter.version"] = "5.14.2"
+
 dependencies {
 	implementation("org.springframework.boot:spring-boot-starter-web")
 	testImplementation("org.springframework.boot:spring-boot-starter-test")
+
+	testImplementation("io.cucumber:cucumber-java:${property("cucumberVersion")}")
+	testImplementation("io.cucumber:cucumber-spring:${property("cucumberVersion")}")
+	testImplementation("io.cucumber:cucumber-junit-platform-engine:${property("cucumberVersion")}")
+	testImplementation("org.junit.platform:junit-platform-suite")
 }
 
 tasks.withType<Test> {
