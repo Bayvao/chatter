@@ -19,6 +19,18 @@ public record MessageDTO(
         Instant readAt,
         boolean deleted) {
 
+    /**
+     * Projects a message to its wire form.
+     *
+     * <p>The single rendering path: REST history, the live broadcast, and sync
+     * batches all go through here, so a message looks identical however it
+     * arrives.
+     *
+     * <p>A deleted message keeps its id and {@code seq} — clients treat a gap in
+     * the sequence as "not fetched yet" and would resync forever — but its
+     * content is dropped and {@code deleted} set, which is what the UI renders
+     * as a tombstone.
+     */
     public static MessageDTO from(Message message) {
         boolean deleted = message.getDeletedAt() != null;
         return new MessageDTO(

@@ -47,7 +47,13 @@ public class UserController {
         this.contactService = contactService;
     }
 
-    /** Lets a client find someone to start a chat with. Blocked users are hidden. */
+    /**
+     * Finds people to start a chat with.
+     *
+     * <p>Backs the search box in the chat list. Blocked users are filtered out
+     * here rather than in the query, keeping the block list a concern of the
+     * user module alone.
+     */
     @GetMapping("/search")
     public List<UserDTO> search(@AuthenticationPrincipal AuthenticatedUser principal,
                                  @RequestParam("q") String query) {
@@ -59,11 +65,28 @@ public class UserController {
                 .toList();
     }
 
+    /**
+     * The caller's own profile, display fields and extended fields combined.
+     *
+     * <p>Used to populate the Profile screen. Two reads because the fields live
+     * in two tables — {@code users} for what messages snapshot, {@code
+     * user_profiles} for everything else.
+     */
     @GetMapping("/me/profile")
     public ProfileDTO myProfile(@AuthenticationPrincipal AuthenticatedUser principal) {
         return ProfileDTO.from(userService.getById(principal.id()), profileService.getProfile(principal.id()));
     }
 
+    /**
+     * Saves an edit to the caller's own profile.
+     *
+     * <p>Used by the Profile form. Scoped to {@code /me} on purpose: a
+     * {@code /{userId}/profile} write route would let any signed-in user edit
+     * anyone else's details.
+     *
+     * <p>A {@code PUT} that behaves as a patch — null fields are left alone, so
+     * the client may send only what changed.
+     */
     @PutMapping("/me/profile")
     public ProfileDTO updateMyProfile(@AuthenticationPrincipal AuthenticatedUser principal,
                                        @Valid @RequestBody UpdateProfileRequest request) {
@@ -71,16 +94,38 @@ public class UserController {
         return ProfileDTO.from(user, profileService.getProfile(principal.id()));
     }
 
+    /**
+     * Someone else's profile.
+     *
+     * <p>Used when viewing a person you are chatting with. Read-only, which is
+     * why a userId in the path is acceptable here where it would not be on the
+     * write route above.
+     */
     @GetMapping("/{userId}/profile")
     public ProfileDTO profileOf(@PathVariable UUID userId) {
         return ProfileDTO.from(userService.getById(userId), profileService.getProfile(userId));
     }
 
+    /**
+     * The caller's saved contacts, newest first.
+     *
+     * <p>Backs the Contacts tab. Blocked contacts are omitted; they are still
+     * stored, and reappear if unblocked.
+     */
     @GetMapping("/me/contacts")
     public List<ContactDTO> myContacts(@AuthenticationPrincipal AuthenticatedUser principal) {
         return contactService.listContacts(principal.id());
     }
 
+    /**
+     * Saves someone to the caller's contacts.
+     *
+     * <p>Used by "Add contact" beside a search result. Returns 409 if they are
+     * already saved, which the frontend deliberately ignores — the button is
+     * fire-and-forget.
+     *
+     * @return 201 when the contact is created
+     */
     @PostMapping("/me/contacts/{userId}")
     public ResponseEntity<Void> addContact(@AuthenticationPrincipal AuthenticatedUser principal,
                                             @PathVariable UUID userId) {
@@ -88,6 +133,12 @@ public class UserController {
         return ResponseEntity.status(201).build();
     }
 
+    /**
+     * Forgets a contact entirely.
+     *
+     * <p>Distinct from blocking: this deletes the row, so the person reappears
+     * in search. Blocking keeps them saved and suppressed.
+     */
     @DeleteMapping("/me/contacts/{userId}")
     public ResponseEntity<Void> removeContact(@AuthenticationPrincipal AuthenticatedUser principal,
                                                @PathVariable UUID userId) {
@@ -95,6 +146,12 @@ public class UserController {
         return ResponseEntity.noContent().build();
     }
 
+    /**
+     * Blocks a contact, hiding them from the contact list and from search.
+     *
+     * <p>Note this does not currently stop them messaging the caller — it is a
+     * visibility control, not a delivery one.
+     */
     @PostMapping("/me/contacts/{userId}/block")
     public ResponseEntity<Void> blockContact(@AuthenticationPrincipal AuthenticatedUser principal,
                                               @PathVariable UUID userId) {
@@ -102,6 +159,12 @@ public class UserController {
         return ResponseEntity.noContent().build();
     }
 
+    /**
+     * Lifts a block, restoring the contact to the list and to search results.
+     *
+     * <p>Modelled as deleting the block rather than as a second POST, so the
+     * pair reads as one resource being set and cleared.
+     */
     @DeleteMapping("/me/contacts/{userId}/block")
     public ResponseEntity<Void> unblockContact(@AuthenticationPrincipal AuthenticatedUser principal,
                                                 @PathVariable UUID userId) {
@@ -109,6 +172,13 @@ public class UserController {
         return ResponseEntity.noContent().build();
     }
 
+    /**
+     * Marks a contact as a favourite.
+     *
+     * <p>A display hint only — favourites sort first. Grants nothing and hides
+     * nothing, which is why there is no matching unfavourite route yet: nothing
+     * in the UI clears it.
+     */
     @PostMapping("/me/contacts/{userId}/favorite")
     public ResponseEntity<Void> favoriteContact(@AuthenticationPrincipal AuthenticatedUser principal,
                                                  @PathVariable UUID userId) {

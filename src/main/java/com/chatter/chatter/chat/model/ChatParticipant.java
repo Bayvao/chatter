@@ -51,18 +51,40 @@ public class ChatParticipant {
     @Column(name = "muted_until")
     private Instant mutedUntil;
 
+    /**
+     * Adds a user to a chat, with their read cursor at zero.
+     *
+     * <p>Called from {@code ChatService} when a conversation is created — twice
+     * for a 1:1 chat, once per member.
+     */
     public ChatParticipant(UUID chatId, UUID userId, ParticipantRole role) {
         this.chatId = chatId;
         this.userId = userId;
         this.role = (short) role.ordinal();
     }
 
+    /**
+     * Advances the read cursor, never rewinds it.
+     *
+     * <p>Called via {@code ChatService.markReadThrough} when a user reads a
+     * message, and for the sender's own message on send.
+     *
+     * <p>The guard is the point: messages can be read out of order — tapping an
+     * older one in the scrollback, or a sync batch replayed after live traffic —
+     * and without it, doing so would resurrect everything after it as unread.
+     */
     public void markReadThrough(long seq) {
         if (seq > lastReadSeq) {
             lastReadSeq = seq;
         }
     }
 
+    /**
+     * The composite primary key: a user appears at most once per chat.
+     *
+     * <p>Required by JPA as a separate type for an {@code @IdClass}, and
+     * {@code Serializable} because JPA demands it of key classes.
+     */
     public record Key(UUID chatId, UUID userId) implements Serializable {
     }
 }

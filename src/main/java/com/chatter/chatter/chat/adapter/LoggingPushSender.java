@@ -19,6 +19,17 @@ public class LoggingPushSender implements PushSender {
 
     private static final Logger log = LoggerFactory.getLogger(LoggingPushSender.class);
 
+    /**
+     * {@inheritDoc}
+     *
+     * <p>Deliberately does nothing but log. {@code MessageBroadcaster} calls
+     * this for every offline recipient, so with push disabled the send path
+     * still runs end to end and the only difference is that no notification
+     * leaves the process.
+     *
+     * <p>Logged at debug, and without the message body — a disabled feature
+     * should not spill conversation content into the log.
+     */
     @Override
     public void sendMessageNotification(UUID recipientId, Notification notification) {
         log.debug("Push disabled; would notify {} about chat {}", recipientId, notification.chatId());

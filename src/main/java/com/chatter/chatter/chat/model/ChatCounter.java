@@ -32,10 +32,26 @@ public class ChatCounter {
     @Column(name = "last_seq", nullable = false)
     private long lastSeq;
 
+    /**
+     * Starts a chat's sequence at zero.
+     *
+     * <p>Created alongside the chat itself in {@code ChatService}, so sending
+     * only ever increments a row that already exists and never has to race to
+     * create one.
+     */
     public ChatCounter(UUID chatId) {
         this.chatId = chatId;
     }
 
+    /**
+     * Allocates the next sequence number in this chat.
+     *
+     * <p>Called once per message from {@code MessageService.send}, which loads
+     * this row under a pessimistic write lock first. That lock is what makes the
+     * increment safe: two concurrent sends would otherwise both read the same
+     * value and produce a duplicate {@code seq}, breaking the total order every
+     * cursor depends on.
+     */
     public long nextSeq() {
         return ++lastSeq;
     }

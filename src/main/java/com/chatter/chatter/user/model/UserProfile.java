@@ -51,10 +51,27 @@ public class UserProfile {
     @Column(name = "updated_at", nullable = false)
     private Instant updatedAt = Instant.now();
 
+    /**
+     * Creates the extended profile row for a user.
+     *
+     * <p>Called lazily from {@code ProfileService.updateProfile} on the first
+     * save — most users never fill in any of these fields, so the row is not
+     * created with the account.
+     *
+     * <p>Shares the user's id as its primary key: one profile per user, no
+     * separate identifier needed.
+     */
     public UserProfile(UUID userId) {
         this.userId = userId;
     }
 
+    /**
+     * Stamps the row as modified now.
+     *
+     * <p>Called on every profile save. Explicit rather than a JPA lifecycle
+     * callback, so it is visible at the call site that this is what maintains
+     * {@code updated_at}.
+     */
     public void touch() {
         this.updatedAt = Instant.now();
     }

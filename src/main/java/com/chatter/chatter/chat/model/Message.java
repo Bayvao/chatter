@@ -69,6 +69,17 @@ public class Message {
     @Column(name = "deleted_at")
     private Instant deletedAt;
 
+    /**
+     * Builds a text message, ready to persist.
+     *
+     * <p>The only way a {@code Message} is created; called from
+     * {@code MessageService.send} with a {@code seq} freshly allocated from the
+     * chat's counter.
+     *
+     * <p>The id is assigned here rather than by the database, so the caller
+     * holds it before the insert. The sender snapshot is copied in for the same
+     * reason history needs no join into the user module.
+     */
     public static Message text(UUID chatId, UUID senderId, long seq, UUID clientMsgId, String content,
                                 SenderSnapshot sender) {
         Message message = new Message();
@@ -84,10 +95,27 @@ public class Message {
         return message;
     }
 
+    /**
+     * The delivery status as an enum.
+     *
+     * <p>Stored as a {@code short} ordinal so the column stays compact and
+     * orderable — the comparisons in {@link #markDelivered} and
+     * {@link #markRead} rely on that ordering. Used by {@code MessageDTO.from}
+     * when rendering.
+     */
     public MessageStatus status() {
         return MessageStatus.values()[status];
     }
 
+    /**
+     * Moves the message to DELIVERED, if it is not already further along.
+     *
+     * <p>Called by {@code MessageBroadcaster} once the message has reached at
+     * least one recipient's client.
+     *
+     * <p>The guard makes status monotonic: a message already READ must not fall
+     * back to DELIVERED when a second recipient's client connects.
+     */
     public void markDelivered() {
         if (status < MessageStatus.DELIVERED.ordinal()) {
             status = (short) MessageStatus.DELIVERED.ordinal();
@@ -95,6 +123,14 @@ public class Message {
         }
     }
 
+    /**
+     * Moves the message to READ, if it is not already.
+     *
+     * <p>Called by {@code MessageService.markRead} when a recipient's client
+     * reports the message as seen. Monotonic for the same reason as
+     * {@link #markDelivered} — this is what drives the sender's read receipt,
+     * which must never move backwards.
+     */
     public void markRead() {
         if (status < MessageStatus.READ.ordinal()) {
             status = (short) MessageStatus.READ.ordinal();

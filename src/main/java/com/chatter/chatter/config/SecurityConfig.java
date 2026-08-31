@@ -35,16 +35,40 @@ public class SecurityConfig {
         this.allowedOrigins = allowedOrigins;
     }
 
+    /**
+     * The password hasher, used both when registering and when checking a login.
+     *
+     * <p>Injected into {@code UserService} to hash on the way in, and used by
+     * Spring's {@code AuthenticationManager} to verify. BCrypt stores its cost
+     * and salt inside the hash, so raising the cost later leaves existing
+     * hashes verifiable.
+     */
     @Bean
     public PasswordEncoder passwordEncoder() {
         return new BCryptPasswordEncoder();
     }
 
+    /**
+     * Exposes Spring's configured authentication manager as a bean.
+     *
+     * <p>Needed because {@code AuthController.login} performs the password check
+     * itself rather than going through a form-login filter; without this
+     * exposure it could not be injected.
+     */
     @Bean
     public AuthenticationManager authenticationManager(AuthenticationConfiguration configuration) throws Exception {
         return configuration.getAuthenticationManager();
     }
 
+    /**
+     * Allows the browser frontend, served from a different origin, to call this
+     * API.
+     *
+     * <p>Origins come from {@code app.cors.allowed-origins} rather than being
+     * wildcarded, which is required in any case once credentials are allowed.
+     * Applies to HTTP only — the WebSocket handshake is restricted separately
+     * in {@code WebSocketConfig}.
+     */
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration configuration = new CorsConfiguration();
@@ -58,6 +82,19 @@ public class SecurityConfig {
         return source;
     }
 
+    /**
+     * The HTTP security policy: what is public, what needs a token, and how a
+     * rejection looks.
+     *
+     * <p>Register, login and the WebSocket handshake are open; everything else
+     * requires a valid JWT, which {@link JwtAuthenticationFilter} supplies by
+     * running before the username/password filter.
+     *
+     * <p>Stateless throughout — no session is created, so there is no session
+     * cookie for CSRF to protect, which is why CSRF is off rather than
+     * overlooked. Unauthenticated requests get a bare 401 instead of a redirect
+     * to a login page that does not exist on this server.
+     */
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         http

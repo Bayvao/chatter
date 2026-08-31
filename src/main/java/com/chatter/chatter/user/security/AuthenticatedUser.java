@@ -13,6 +13,15 @@ import java.util.UUID;
  */
 public record AuthenticatedUser(UUID id, String username) implements Principal {
 
+    /**
+     * The username, as {@link Principal} requires.
+     *
+     * <p>Used by Spring's STOMP support to route {@code /user/queue/...}
+     * messages: {@code convertAndSendToUser(user.getName(), ...)} in
+     * {@code SyncController} resolves to this session's queue through this
+     * value. It is therefore the username, not the id, that must be unique and
+     * stable.
+     */
     @Override
     public String getName() {
         return username;

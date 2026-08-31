@@ -26,6 +26,14 @@ import com.chatter.chatter.chat.service.ChatService;
 import com.chatter.chatter.chat.service.MessageService;
 import com.chatter.chatter.user.security.AuthenticatedUser;
 
+/**
+ * The REST face of the chat module: conversations, history and the non-socket
+ * message operations.
+ *
+ * <p>Live sending goes over STOMP instead ({@code ChatWebSocketController});
+ * what is here is everything a client needs on load, plus a fallback send.
+ * Every route takes the caller from the security context, never from the path.
+ */
 @RestController
 @RequestMapping("/api/chats")
 public class ChatController {
@@ -40,11 +48,27 @@ public class ChatController {
         this.messageService = messageService;
     }
 
+    /**
+     * The caller's conversations, with previews and unread counts.
+     *
+     * <p>Used to populate the sidebar on load, and again after each WebSocket
+     * reconnect so counts that moved while disconnected are corrected.
+     */
     @GetMapping
     public List<ChatDTO> myChats(@AuthenticationPrincipal AuthenticatedUser principal) {
         return chatService.listChatsFor(principal.id());
     }
 
+    /**
+     * Opens the 1:1 chat with another user, creating it if this is the first
+     * contact.
+     *
+     * <p>Used when picking someone out of search. Idempotent despite being a
+     * POST — a second call returns the same conversation, so double-clicking
+     * cannot fork history.
+     *
+     * @return 201 with the chat, whether it was just created or already existed
+     */
     @PostMapping("/with/{userId}")
     public ResponseEntity<ChatDTO> openDirectChat(@AuthenticationPrincipal AuthenticatedUser principal,
                                                     @PathVariable UUID userId) {
@@ -52,6 +76,17 @@ public class ChatController {
         return ResponseEntity.status(HttpStatus.CREATED).body(chatService.toDto(chat, principal.id()));
     }
 
+    /**
+     * A page of history, newest first.
+     *
+     * <p>Used when opening a conversation, and again with {@code beforeSeq} set
+     * to the oldest message held when scrolling back.
+     *
+     * <p>{@code limit} is clamped rather than trusted: an unbounded page size is
+     * a denial-of-service handed to any authenticated client. {@code Math.min}
+     * and {@code Math.max} rather than {@code Math.clamp} because CI compiles at
+     * the JDK 17 API level, where the latter does not exist.
+     */
     @GetMapping("/{chatId}/messages")
     public List<MessageDTO> history(@AuthenticationPrincipal AuthenticatedUser principal,
                                      @PathVariable UUID chatId,
@@ -63,7 +98,13 @@ public class ChatController {
                 .toList();
     }
 
-    /** Reconnect path: "I have through seq N, send me the rest." */
+    /**
+     * Everything after a cursor: "I have through seq N, send me the rest."
+     *
+     * <p>The REST equivalent of {@code SyncController}'s {@code /app/sync.start},
+     * for a client that wants to catch up without a socket. The live frontend
+     * uses the STOMP path instead, which handles all chats in one round trip.
+     */
     @GetMapping("/{chatId}/messages/since")
     public List<MessageDTO> since(@AuthenticationPrincipal AuthenticatedUser principal,
                                    @PathVariable UUID chatId,
@@ -74,8 +115,14 @@ public class ChatController {
     }
 
     /**
-     * REST send, mainly for clients without a live socket. The WebSocket path
-     * is the primary one; both funnel through the same service and broadcast.
+     * Sends a message over plain HTTP.
+     *
+     * <p>Mainly for clients without a live socket, and what the Cucumber suite
+     * uses to send without standing up a STOMP session. The WebSocket path is
+     * the primary one; both funnel through the same service, so the message is
+     * still broadcast to subscribers and still marked delivered.
+     *
+     * @return 201 with the stored message, including its assigned {@code seq}
      */
     @PostMapping("/messages")
     public ResponseEntity<MessageDTO> send(@AuthenticationPrincipal AuthenticatedUser principal,
@@ -85,6 +132,12 @@ public class ChatController {
         return ResponseEntity.status(HttpStatus.CREATED).body(MessageDTO.from(message));
     }
 
+    /**
+     * Marks a message read, clearing the unread badge up to that point.
+     *
+     * <p>Called by the client as messages become visible. Both effects matter:
+     * the read receipt for the sender, and the caller's own read cursor.
+     */
     @PostMapping("/{chatId}/messages/{messageId}/read")
     public ResponseEntity<Void> markRead(@AuthenticationPrincipal AuthenticatedUser principal,
                                           @PathVariable UUID chatId, @PathVariable UUID messageId) {
@@ -92,6 +145,14 @@ public class ChatController {
         return ResponseEntity.noContent().build();
     }
 
+    /**
+     * Retracts a message the caller sent.
+     *
+     * <p>A soft delete: the row and its sequence number survive so clients never
+     * see a gap, and the content is replaced with a tombstone the UI renders as
+     * "This message was deleted". Silently does nothing if the caller is not the
+     * sender.
+     */
     @DeleteMapping("/{chatId}/messages/{messageId}")
     public ResponseEntity<Void> delete(@AuthenticationPrincipal AuthenticatedUser principal,
                                         @PathVariable UUID chatId, @PathVariable UUID messageId) {
