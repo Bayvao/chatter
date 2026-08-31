@@ -2,25 +2,70 @@ import { useEffect, useRef, useState } from 'react';
 import { useAuthStore } from '../store/authStore';
 import { useChatStore } from '../store/chatStore';
 import websocket from '../services/websocket';
+import { disablePush, enablePush } from '../services/push';
 import ChatList from './ChatList';
 import ContactList from './ContactList';
 import MessageBubble from './MessageBubble';
 import MessageInput from './MessageInput';
+import PresenceDot from './PresenceDot';
 import Profile from './Profile';
 
 export default function ChatWindow() {
   const { user, token, logout } = useAuthStore();
-  const { chats, activeChatId, messages, loadingMessages, loadChats, receiveMessage, reset } = useChatStore();
+  const {
+    chats,
+    activeChatId,
+    messages,
+    loadingMessages,
+    presence,
+    loadChats,
+    receiveMessage,
+    receiveSyncBatch,
+    setPresence,
+    selectChat,
+    reset,
+  } = useChatStore();
   const bottomRef = useRef(null);
   const [sidebarTab, setSidebarTab] = useState('chats');
   const [showProfile, setShowProfile] = useState(false);
 
   useEffect(() => {
     loadChats();
-    websocket.connect(token, { onConnect: () => loadChats() });
+
+    websocket.connect(token, {
+      onConnect: () => {
+        loadChats();
+        websocket.subscribeToPresence(setPresence);
+        websocket.subscribeToSync({ onBatch: receiveSyncBatch });
+      },
+      // The socket drops silently; this is where anything sent in the gap is
+      // recovered. Cursors are read at fire time, not closed over.
+      onReconnect: () => websocket.startSync(useChatStore.getState().cursors),
+    });
+
+    // Ask once per session, after sign-in rather than on page load, so the
+    // permission prompt has visible context.
+    enablePush();
 
     return () => websocket.disconnect();
-  }, [token, loadChats]);
+  }, [token, loadChats, receiveSyncBatch, setPresence]);
+
+  // The service worker focuses this tab on a notification click and tells us
+  // which conversation it was for.
+  useEffect(() => {
+    if (!('serviceWorker' in navigator)) {
+      return undefined;
+    }
+
+    const onMessage = (event) => {
+      if (event.data?.type === 'notification-click' && event.data.chatId) {
+        selectChat(event.data.chatId);
+      }
+    };
+
+    navigator.serviceWorker.addEventListener('message', onMessage);
+    return () => navigator.serviceWorker.removeEventListener('message', onMessage);
+  }, [selectChat]);
 
   // Re-subscribe whenever the open conversation changes; the topic is
   // per-chat and the server checks membership on SUBSCRIBE.
@@ -46,7 +91,10 @@ export default function ChatWindow() {
 
   const activeChat = chats.find((chat) => chat.id === activeChatId);
 
-  const onLogout = () => {
+  const onLogout = async () => {
+    // Retire the push subscription first: after logout the API call that
+    // identifies it would no longer be authenticated.
+    await disablePush();
     websocket.disconnect();
     reset();
     logout();
@@ -98,6 +146,9 @@ export default function ChatWindow() {
           {!showProfile && activeChatId && (
             <>
               <div className="conversation-header">
+                {!activeChat?.group && activeChat?.otherUserId && (
+                  <PresenceDot presence={presence[activeChat.otherUserId]} />
+                )}
                 {activeChat?.title ?? activeChat?.otherUserName ?? 'Conversation'}
               </div>
 

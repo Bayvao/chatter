@@ -1,9 +1,10 @@
 import { useState } from 'react';
 import api from '../services/api';
 import { useChatStore } from '../store/chatStore';
+import PresenceDot from './PresenceDot';
 
 export default function ChatList() {
-  const { chats, activeChatId, selectChat, openChatWith } = useChatStore();
+  const { chats, activeChatId, presence, selectChat, openChatWith } = useChatStore();
   const [query, setQuery] = useState('');
   const [results, setResults] = useState([]);
   const [searching, setSearching] = useState(false);
@@ -74,7 +75,11 @@ export default function ChatList() {
               className={chat.id === activeChatId ? 'active' : ''}
               onClick={() => selectChat(chat.id)}
             >
-              <div className="chat-name">{chat.title ?? chat.otherUserName ?? 'Conversation'}</div>
+              <div className="chat-name">
+                {/* Group chats have many members, so a single dot would be a lie. */}
+                {!chat.group && chat.otherUserId && <PresenceDot presence={presence[chat.otherUserId]} />}
+                {chat.title ?? chat.otherUserName ?? 'Conversation'}
+              </div>
               <div className="chat-preview">{chat.lastMessage ?? 'No messages yet'}</div>
               {chat.unreadCount > 0 && <span className="badge">{chat.unreadCount}</span>}
             </button>

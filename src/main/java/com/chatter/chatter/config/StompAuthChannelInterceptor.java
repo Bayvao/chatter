@@ -95,7 +95,7 @@ public class StompAuthChannelInterceptor implements ChannelInterceptor {
         }
     }
 
-    static AuthenticatedUser principalOf(StompHeaderAccessor accessor) {
+    public static AuthenticatedUser principalOf(StompHeaderAccessor accessor) {
         if (accessor.getUser() instanceof UsernamePasswordAuthenticationToken token
                 && token.getPrincipal() instanceof AuthenticatedUser principal) {
             return principal;

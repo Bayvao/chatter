@@ -10,6 +10,7 @@
   --other-bubble: #eceef1;
   --danger: #b91c1c;
   --danger-bg: #fee2e2;
+  --online: #16a34a;
 }
 
 * {
@@ -224,8 +225,29 @@ button.link {
 }
 
 .chat-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   font-weight: 600;
   margin-bottom: 2px;
+}
+
+.presence-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.presence-dot.online {
+  background: var(--online);
+}
+
+/* Hollow rather than filled: offline should read as absence, not as a
+   second status competing for attention. */
+.presence-dot.offline {
+  background: transparent;
+  border: 1px solid var(--muted);
 }
 
 .chat-preview {
@@ -266,6 +288,9 @@ button.link {
 }
 
 .conversation-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   padding: 14px 20px;
   font-weight: 600;
   background: var(--surface);

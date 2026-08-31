@@ -1,29 +1,66 @@
-# Future enhancement: push notifications
+# Push notifications
 
-**Status:** deferred, not implemented.
-**Blocked on:** a client that can receive push — a mobile app, or browser
-notifications with the tab closed. Neither exists yet.
+**Status:** Web Push **implemented in Phase 3**. Mobile push (FCM / APNs)
+remains deferred — there is no mobile app to receive it.
+
+This file started life as a plan for deferred work. Phase 3 built the browser
+half of it, so what follows is a record of what shipped, and what is still open.
 
 ---
 
-## Why it is deferred
+## What shipped
 
-Push notifications exist to reach a user whose app is **closed or backgrounded
-on a device**. Chatter is currently a browser app, and the two states a browser
-client can be in are both already covered:
+Web Push (RFC 8030/8291), with VAPID and a service worker. **No Firebase**, no
+third-party messaging account, no credentials file: the browser nominates its
+own push service, we encrypt the payload for the subscription's key and sign
+the request with ours.
 
-| Client state | How the user gets the message today |
+| Piece | Where |
 |---|---|
-| Tab open | WebSocket push (`/topic/chats/{chatId}`) |
-| Tab closed | Reconnect sync — everything with `seq > last_read_seq` |
+| Port | `chat/port/PushSender.java` |
+| Real adapter | `chat/adapter/WebPushSender.java` (`app.push.vapid.enabled=true`) |
+| Default no-op | `chat/adapter/LoggingPushSender.java` |
+| Subscription store | `app_user.push_subscriptions` (`V4__create_push_subscriptions.sql`) |
+| Registration API | `user/controller/PushController.java` |
+| Hook point | `chat/websocket/MessageBroadcaster.java` |
+| Service worker | `frontend/public/sw.js` |
+| Browser subscribe flow | `frontend/src/services/push.js` |
 
-There is no gap for push to fill. Building it now would mean carrying a Firebase
-dependency, a credentials file, and a device-token table for a code path nothing
-exercises.
+The hook point landed as predicted — `MessageBroadcaster` was already listening
+for `MessageSent` at `AFTER_COMMIT`, so push was one branch on the presence
+check, with nothing on the send path changed. That is the payoff for publishing
+a domain event from day one.
 
-### Redis is not a substitute
+The table is `push_subscriptions` rather than the `user_devices` sketched below,
+because a Web Push subscription is not a device token: it is an endpoint URL
+plus two client-held keys (`p256dh`, `auth`). The **unique index on `endpoint`
+was kept**, for exactly the reason the original plan gave for `device_token` —
+push services reassign endpoints, and without it one browser accumulates rows
+under several users and receives someone else's messages.
 
-Worth stating plainly, because it comes up:
+Two operational rules from the plan are implemented: dead subscriptions are
+deleted on a `404`/`410`, and a push failure is logged but never propagated —
+the message is already committed, so an unavailable push service must not
+decide whether our write succeeded.
+
+**Not covered by tests.** `WebPushSender` needs a live browser subscription and
+the service worker needs HTTPS, so neither runs in CI; `LoggingPushSender` is
+the tested default. Verify manually against a real browser.
+
+---
+
+## What is still open
+
+### Mobile push (FCM / APNs)
+
+Still blocked on the same thing: there is no mobile app. When one exists, the
+transport table below still applies, and the `PushSender` port means the
+addition is a second adapter rather than a change to the send path.
+
+#### Redis is not a substitute
+
+Worth restating, because it comes up, and because Phase 3 introduced Redis for
+presence — which is a different job entirely:
 
 - **FCM / APNs** deliver over a connection the **operating system** already
   holds open to Apple's or Google's servers. That is the entire mechanism, and
@@ -36,120 +73,43 @@ Worth stating plainly, because it comes up:
 No self-hosted component can wake a closed mobile app. If we want that, we
 integrate the platform push service; there is no way around it.
 
----
-
-## What to build, when the time comes
-
-### 1. Pick the transport for the client you actually have
+#### Transport, per client
 
 | Client | Service | Notes |
 |---|---|---|
+| Browser, tab closed | **Web Push** (VAPID + service worker) | ✅ shipped in Phase 3 |
 | Android / iOS app | **FCM** (FCM relays to APNs for iOS) | Needs a Firebase project + service-account JSON |
-| Browser, tab closed | **Web Push** (VAPID + service worker) | No Firebase needed; a W3C standard |
 | Desktop (Electron) | OS-native, or Web Push | |
 
-Do not reach for FCM reflexively. If the goal is browser notifications, Web
-Push is the smaller dependency — a VAPID key pair and a service worker, no
-third-party account.
+Do not reach for FCM reflexively. For browsers, Web Push was the smaller
+dependency — a VAPID key pair and a service worker — which is why Phase 3 took
+it.
 
-### 2. Migration: device registry
+### Muting
 
-```sql
-CREATE TABLE app_user.user_devices (
-    id           uuid PRIMARY KEY,
-    user_id      uuid NOT NULL REFERENCES app_user.users (id) ON DELETE CASCADE, -- KEPT
-    device_token varchar(512) NOT NULL,
-    platform     smallint NOT NULL,     -- 0=web 1=android 2=ios
-    app_version  varchar(32),
-    registered_at timestamptz NOT NULL DEFAULT now(),
-    last_active   timestamptz NOT NULL DEFAULT now()
-);
+`chat_participants.muted_until` exists and is **still unused**. It should be
+checked before sending a notification. This is the smallest open item.
 
-CREATE UNIQUE INDEX ux_user_devices_token ON app_user.user_devices (device_token);
-CREATE INDEX idx_user_devices_user ON app_user.user_devices (user_id);
-```
+### Fan-out cost
 
-The foreign key to `users` is **kept** — same aggregate, same module, never
-crosses a service boundary. Contrast `chat.messages.sender_id`, which has none.
-See the "no foreign keys across module boundaries" rule in the architecture doc.
+One message to a 1,000-member group is 1,000 sends. `WebPushSender` is `@Async`
+so it is already off the request thread, but by Phase 5 it belongs behind the
+outbox and a Kafka consumer rather than a thread pool.
 
-The unique index on `device_token` matters: tokens get reassigned by the
-platform, and without it one physical device can accumulate rows under several
-users and receive someone else's notifications.
+### Payload content after Phase 3.75
 
-### 3. Port + adapter
-
-Follow the existing `SenderDirectory` / `PresenceStore` shape
-(`chat/port/`) so nothing outside the adapter knows which provider is in play:
-
-```java
-public interface NotificationSender {
-    void notifyOfMessage(UUID recipientId, MessageSent event);
-}
-```
-
-- `LoggingNotificationSender` — the default. Logs and returns.
-- `FcmNotificationSender` / `WebPushNotificationSender` — `@ConditionalOnProperty`,
-  active only when credentials are configured.
-
-Defaulting to the no-op is deliberate: `docker compose up` must keep working for
-a contributor with no Firebase account.
-
-### 4. Hook point
-
-`MessageBroadcaster` (`chat/websocket/MessageBroadcaster.java`) already listens
-for `MessageSent` at `AFTER_COMMIT` and will already know, from `PresenceStore`,
-whether the recipient is online. Push is one branch:
-
-```java
-if (presence.isOnline(recipientId)) {
-    messagingTemplate.convertAndSend(...);   // existing path
-} else {
-    notificationSender.notifyOfMessage(recipientId, event);   // new
-}
-```
-
-Nothing on the send path changes. That is the payoff for publishing a domain
-event from day one.
-
-### 5. Operational details that are easy to miss
-
-- **Token invalidation.** FCM returns `UNREGISTERED` / `INVALID_ARGUMENT` for
-  dead tokens. Delete the row on that response, or the table grows without bound
-  and every send wastes a call.
-- **Failures must not fail the send.** The message is already committed. A push
-  failure is logged, never propagated — do not let Google's availability decide
-  whether our write succeeds.
-- **Fan-out cost.** One message to a 1,000-member group is 1,000 sends. Keep it
-  off the request thread; by Phase 5 it belongs behind the outbox and a Kafka
-  consumer.
-- **Content in the payload.** Fine today. **Not fine after Phase 3.75** — once
-  messages are end-to-end encrypted the server holds ciphertext and cannot put
-  message text in a notification. It becomes a content-free ping and the client
-  decrypts locally. Designing for that now costs nothing: keep the payload to
-  ids and a count.
-- **Quiet hours / muting.** `chat_participants.muted_until` already exists and
-  is currently unused. Check it before sending.
-
----
-
-## Rough effort
-
-| Piece | Estimate |
-|---|---|
-| `user_devices` migration + registration endpoint | 3h |
-| Port, no-op adapter, wiring, tests | 3h |
-| FCM or Web Push adapter + token invalidation | 6h |
-| Client registration + permission prompt | 6h |
-| **Total** | **~18h** |
-
-The client half is most of it, and none of it is testable without a real device
-or a real browser permission grant — budget for manual verification.
+The payload currently carries `{chatId, title, body}`, where `body` is the
+message text, truncated. **That stops being viable once messages are
+end-to-end encrypted** — the server will hold ciphertext and cannot put message
+text in a notification. It becomes a content-free ping and the client decrypts
+locally. The shape is already close: dropping `body` and adding a count is the
+whole change.
 
 ---
 
 ## References
 
-- `chat/port/SenderDirectory.java` — the port/adapter pattern to copy
+- `chat/port/PushSender.java`, `chat/port/PresenceStore.java` — the ports
 - `chat/websocket/MessageBroadcaster.java` — the hook point
 - `chat-app-architecture.md` — FK rules; the E2E section on content-free pings
+- README, "Web Push" — generating a VAPID keypair and enabling it locally
