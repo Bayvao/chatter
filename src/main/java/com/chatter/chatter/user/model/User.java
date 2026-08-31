@@ -71,6 +71,16 @@ public class User {
     @Column(name = "erased_at")
     private Instant erasedAt;
 
+    /**
+     * Builds a new account, ready to persist.
+     *
+     * <p>The only way a {@code User} is created; called from
+     * {@code UserService.register}. Takes the password already encoded, so a
+     * plaintext one cannot reach a row by mistake.
+     *
+     * <p>Version starts at zero and {@code enabled} at true; profile fields are
+     * filled in later through {@code ProfileService}.
+     */
     public static User create(String username, String email, String encodedPassword) {
         User user = new User();
         user.id = Ids.newId();
@@ -80,6 +90,14 @@ public class User {
         return user;
     }
 
+    /**
+     * The name to show for this user.
+     *
+     * <p>Used when snapshotting a sender onto a message, when naming the other
+     * party in a 1:1 chat, and by {@code UserDTO}. Falls back to the username
+     * until both name parts are set, so a user who has never opened their
+     * profile still renders as something.
+     */
     public String getDisplayName() {
         if (firstName != null && lastName != null) {
             return firstName + " " + lastName;

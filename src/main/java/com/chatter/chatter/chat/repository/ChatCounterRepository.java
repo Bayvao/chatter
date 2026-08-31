@@ -17,8 +17,18 @@ import com.chatter.chatter.chat.model.ChatCounter;
 public interface ChatCounterRepository extends JpaRepository<ChatCounter, UUID> {
 
     /**
-     * Row lock serialises concurrent sends to the same chat, so two writers
-     * cannot hand out the same seq.
+     * Loads a chat's counter under a row lock, for allocating the next seq.
+     *
+     * <p>Called once per send by {@code MessageService.send}, and the only way
+     * this row should ever be read for writing.
+     *
+     * <p>The lock serialises concurrent sends to the same chat so two writers
+     * cannot hand out the same {@code seq}. It is held for the rest of the
+     * transaction, which is why the send path keeps its work after this point
+     * short — sends to the same conversation queue behind it.
+     *
+     * <p>A lock rather than {@code ON CONFLICT ... RETURNING}, which H2 does not
+     * support and the test suite runs on H2.
      */
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select c from ChatCounter c where c.chatId = :chatId")

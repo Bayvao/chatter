@@ -32,28 +32,48 @@ public class RedisPresenceStore implements PresenceStore {
         this.redis = redis;
     }
 
+    /**
+     * {@inheritDoc}
+     *
+     * <p>The TTL is the whole point: if this instance dies without ever calling
+     * {@link #markOffline}, Redis expires the key on its own and the user stops
+     * showing as online. A status column could not do that.
+     */
     @Override
     public void markOnline(UUID userId, Duration ttl) {
         redis.opsForValue().set(ONLINE_PREFIX + userId, Instant.now().toString(), ttl);
     }
 
+    /**
+     * {@inheritDoc}
+     *
+     * <p>Two keys, because last-seen must outlive the session it describes:
+     * the online key goes, and a separate long-lived key records when.
+     */
     @Override
     public void markOffline(UUID userId) {
         redis.delete(ONLINE_PREFIX + userId);
         redis.opsForValue().set(LAST_SEEN_PREFIX + userId, Instant.now().toString(), LAST_SEEN_RETENTION);
     }
 
+    /**
+     * {@inheritDoc}
+     *
+     * <p>{@code EXPIRE} only extends a key that still exists, so an expired
+     * session is not revived by a late heartbeat.
+     */
     @Override
     public void refresh(UUID userId, Duration ttl) {
-        // Only extends a key that still exists; a expired session is not revived.
         redis.expire(ONLINE_PREFIX + userId, ttl);
     }
 
+    /** {@inheritDoc} A key's mere existence is the answer; its value is unread. */
     @Override
     public boolean isOnline(UUID userId) {
         return Boolean.TRUE.equals(redis.hasKey(ONLINE_PREFIX + userId));
     }
 
+    /** {@inheritDoc} Empty once the 30-day retention on the key has lapsed. */
     @Override
     public Optional<Instant> lastSeen(UUID userId) {
         return Optional.ofNullable(redis.opsForValue().get(LAST_SEEN_PREFIX + userId)).map(Instant::parse);

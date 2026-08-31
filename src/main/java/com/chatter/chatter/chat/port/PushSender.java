@@ -12,8 +12,26 @@ import java.util.UUID;
  */
 public interface PushSender {
 
+    /**
+     * Notifies a user about a message they will not have seen.
+     *
+     * <p>Called by {@code MessageBroadcaster} for each recipient that
+     * {@code PresenceStore} reports offline.
+     *
+     * <p>Implementations must not throw and should not block: the message is
+     * already committed and delivered to everyone online, so a push failure is
+     * not a send failure and an unreachable push service must not stall the
+     * broadcast.
+     */
     void sendMessageNotification(UUID recipientId, Notification notification);
 
+    /**
+     * What the recipient's device is told: which conversation, who from, and a
+     * short preview.
+     *
+     * <p>{@code chatId} is what lets a notification tap open the right
+     * conversation.
+     */
     record Notification(UUID chatId, String title, String body) {
     }
 }

@@ -35,8 +35,23 @@ public class SenderSnapshotProjection {
         this.jdbcTemplate = jdbcTemplate;
     }
 
-    // REQUIRES_NEW because AFTER_COMMIT runs once the publishing transaction has
-    // already committed; joining it is not possible.
+    /**
+     * Rewrites the sender snapshot on every message this user has sent.
+     *
+     * <p>Invoked by Spring for each {@link UserProfileChanged} published by
+     * {@code ProfileService}, once that transaction commits.
+     *
+     * <p>A single bulk {@code UPDATE} rather than loading entities: this can
+     * touch every message a long-standing user ever sent, and doing that through
+     * JPA would pull all of them into memory.
+     *
+     * <p>The {@code sender_version <} predicate in the statement is what makes
+     * it safe to replay — an event delivered twice, or two renames landing
+     * backwards, cannot overwrite newer data.
+     *
+     * <p>REQUIRES_NEW because AFTER_COMMIT runs once the publishing transaction
+     * has already committed; joining it is not possible.
+     */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     public void onProfileChanged(UserProfileChanged event) {

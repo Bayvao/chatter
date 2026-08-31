@@ -60,6 +60,18 @@ public class WebPushSender implements PushSender {
         this.subject = subject;
     }
 
+    /**
+     * Prepares the push client once, at startup.
+     *
+     * <p>Called by Spring after construction. Registering BouncyCastle here
+     * rather than per send matters: {@code Security.addProvider} mutates global
+     * JVM state, and the ECDH and HKDF work that payload encryption depends on
+     * needs it present before the first {@code PushService} is built.
+     *
+     * @throws Exception if the configured VAPID keys cannot be parsed — the
+     *         application then fails to start, which is preferable to
+     *         discovering it on the first notification
+     */
     @PostConstruct
     void init() throws Exception {
         // web-push needs a BouncyCastle provider registered for the ECDH and
@@ -75,6 +87,18 @@ public class WebPushSender implements PushSender {
      * slow or unavailable push service must not hold up delivery to everyone
      * else. REQUIRES_NEW because the publishing transaction is long gone.
      */
+    /**
+     * {@inheritDoc}
+     *
+     * <p>Fans out to every browser the recipient has registered — one person may
+     * have several, and all should light up.
+     *
+     * <p>Runs off the caller's thread: the message is already committed, and a
+     * slow or unavailable push service must not hold up delivery to everyone
+     * else. REQUIRES_NEW because the publishing transaction is long gone by the
+     * time this runs, so there is none to join, and expiring a dead subscription
+     * needs one of its own.
+     */
     @Async
     @Override
     @Transactional(propagation = Propagation.REQUIRES_NEW)
@@ -84,6 +108,19 @@ public class WebPushSender implements PushSender {
         }
     }
 
+    /**
+     * Encrypts and posts one notification, and acts on what the push service
+     * says.
+     *
+     * <p>A 404 or 410 means the subscription is permanently dead — the browser
+     * was uninstalled, or the user revoked permission — so the row is dropped.
+     * Without that the table grows without bound and every later send wastes a
+     * request on it.
+     *
+     * <p>Nothing propagates. The message is already saved and delivered to
+     * anyone online, so a push failure is not a send failure, and one browser
+     * failing must not stop the others being notified.
+     */
     private void deliver(PushSubscription subscription, PushSender.Notification notification) {
         try {
             byte[] payload = objectMapper.writeValueAsBytes(new Payload(
@@ -116,6 +153,13 @@ public class WebPushSender implements PushSender {
         }
     }
 
+    /**
+     * Caps the preview text.
+     *
+     * <p>Push services reject payloads much larger than a few kilobytes once
+     * encrypted, and a notification only shows a line or two anyway. Null-safe
+     * because a deleted message has no content.
+     */
     private String truncate(String body) {
         if (body == null) {
             return "";
@@ -123,6 +167,13 @@ public class WebPushSender implements PushSender {
         return body.length() <= MAX_BODY_CHARS ? body : body.substring(0, MAX_BODY_CHARS) + "…";
     }
 
+    /**
+     * The JSON the service worker receives and renders.
+     *
+     * <p>Kept to what {@code sw.js} reads. It will have to lose {@code body}
+     * once messages are end-to-end encrypted, since the server will then hold
+     * only ciphertext.
+     */
     private record Payload(String chatId, String title, String body) {
     }
 }

@@ -47,8 +47,29 @@ public class MessageBroadcaster {
         this.pushSender = pushSender;
     }
 
-    // REQUIRES_NEW: the publishing transaction has already committed, so this
-    // cannot join it, and marking DELIVERED needs a transaction of its own.
+    /**
+     * Delivers a committed message: broadcast to the chat topic, push to anyone
+     * offline, and set the delivery status.
+     *
+     * <p>Invoked by Spring for every {@link MessageSent} published by
+     * {@code MessageService.send}, once that transaction commits. It is the only
+     * thing that writes to a chat topic.
+     *
+     * <p>The message is re-read rather than carried on the event, so the frame
+     * reflects the committed row — and a message deleted between commit and
+     * delivery is simply skipped.
+     *
+     * <p>The sender is skipped for notification purposes but still receives the
+     * broadcast, since they subscribe to the same topic as everyone else.
+     *
+     * <p>DELIVERED means "reached at least one recipient's client", so it is set
+     * only when someone other than the sender was online. Anyone offline picks
+     * the message up through sync instead, which is what advances their own read
+     * cursor.
+     *
+     * <p>REQUIRES_NEW: the publishing transaction has already committed, so this
+     * cannot join it, and marking DELIVERED needs a transaction of its own.
+     */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     public void onMessageSent(MessageSent event) {

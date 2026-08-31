@@ -43,6 +43,18 @@ public class StompAuthChannelInterceptor implements ChannelInterceptor {
         this.participantRepository = participantRepository;
     }
 
+    /**
+     * Inspects every inbound STOMP frame before the broker sees it.
+     *
+     * <p>Registered on the client inbound channel by {@code WebSocketConfig}, so
+     * this runs for all WebSocket traffic. Only two commands are gated —
+     * CONNECT and SUBSCRIBE — because those are the two that grant access;
+     * SEND and the rest ride on the session CONNECT already established.
+     *
+     * <p>Throwing from here is how a frame is refused: Spring turns the
+     * exception into an ERROR frame and closes the session, which is why the
+     * tests assert on a dropped connection rather than a returned error.
+     */
     @Override
     public Message<?> preSend(Message<?> message, MessageChannel channel) {
         StompHeaderAccessor accessor = MessageHeaderAccessor.getAccessor(message, StompHeaderAccessor.class);
@@ -61,6 +73,20 @@ public class StompAuthChannelInterceptor implements ChannelInterceptor {
         return message;
     }
 
+    /**
+     * Establishes who the caller is, from the JWT on the CONNECT frame.
+     *
+     * <p>The token travels as a STOMP native header rather than an HTTP one,
+     * because the browser WebSocket API cannot set request headers on a
+     * handshake. That is also why the handshake itself is left unauthenticated
+     * in {@code SecurityConfig} and the check lands here instead.
+     *
+     * <p>The principal is attached to the session, making it available to
+     * {@code @MessageMapping} methods and to {@code PresenceEventListener}.
+     *
+     * @throws AccessDeniedException if the token is missing, malformed or
+     *         expired — the session is then closed
+     */
     private void authenticate(StompHeaderAccessor accessor) {
         String header = accessor.getFirstNativeHeader("Authorization");
         if (header == null || !header.startsWith(BEARER_PREFIX)) {
@@ -76,6 +102,19 @@ public class StompAuthChannelInterceptor implements ChannelInterceptor {
                 principal, null, List.of(new SimpleGrantedAuthority("ROLE_USER"))));
     }
 
+    /**
+     * Refuses a SUBSCRIBE to a chat topic the caller is not a member of.
+     *
+     * <p>Without this, any authenticated user could subscribe to
+     * {@code /topic/chats/{anyId}} and read a conversation they have nothing to
+     * do with: authentication alone is not authorization.
+     *
+     * <p>Only chat topics are matched. Destinations that are not per-chat —
+     * {@code /topic/presence}, the {@code /user/queue/...} destinations, which
+     * Spring already scopes to the session — pass through untouched.
+     *
+     * @throws AccessDeniedException if the caller is not an active participant
+     */
     private void authorizeSubscription(StompHeaderAccessor accessor) {
         String destination = accessor.getDestination();
         if (destination == null) {
@@ -95,6 +134,17 @@ public class StompAuthChannelInterceptor implements ChannelInterceptor {
         }
     }
 
+    /**
+     * Digs the principal out of a STOMP session, or returns {@code null}.
+     *
+     * <p>Shared with {@code PresenceEventListener}, which needs the user behind
+     * a connect or disconnect event and has only the raw message to work from.
+     * Public for that reason — it is the one piece of this class used from
+     * another package.
+     *
+     * <p>Returns null rather than throwing: a session that never completed
+     * CONNECT has no principal, and both callers treat that as "nobody".
+     */
     public static AuthenticatedUser principalOf(StompHeaderAccessor accessor) {
         if (accessor.getUser() instanceof UsernamePasswordAuthenticationToken token
                 && token.getPrincipal() instanceof AuthenticatedUser principal) {

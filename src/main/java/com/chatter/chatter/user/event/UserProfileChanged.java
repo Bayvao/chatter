@@ -19,6 +19,17 @@ public record UserProfileChanged(
         String displayName,
         String avatarUrl) {
 
+    /**
+     * Builds the event, assigning its own id.
+     *
+     * <p>Called by {@code ProfileService.updateProfile}, and only when a
+     * snapshotted field actually changed — publishing on every save would
+     * rewrite every message the user ever sent for nothing.
+     *
+     * <p>The {@code eventId} is generated here so the event is identifiable
+     * before it is published: today that supports nothing, but once this becomes
+     * a Kafka message it is what a consumer de-duplicates on.
+     */
     public static UserProfileChanged of(UUID userId, long version, String displayName, String avatarUrl) {
         return new UserProfileChanged(Ids.newId(), userId, version, displayName, avatarUrl);
     }

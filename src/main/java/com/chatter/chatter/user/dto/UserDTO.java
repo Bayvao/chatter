@@ -14,6 +14,19 @@ public record UserDTO(
         String statusText,
         String displayName) {
 
+    /**
+     * Projects a user entity to its wire form.
+     *
+     * <p>Used wherever a user is returned — auth responses, search results, and
+     * nested inside {@link ContactDTO}.
+     *
+     * <p>Deliberately omits the password hash, the profile-change version, and
+     * the enabled and erased flags: a DTO rather than the entity is precisely
+     * what keeps those off the wire.
+     *
+     * <p>{@code displayName} is computed rather than stored, so the client never
+     * has to reimplement the "full name, else username" fallback.
+     */
     public static UserDTO from(User user) {
         return new UserDTO(
                 user.getId(),

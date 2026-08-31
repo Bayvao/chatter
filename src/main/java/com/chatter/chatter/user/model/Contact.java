@@ -44,11 +44,24 @@ public class Contact {
     @Column(name = "is_favorite", nullable = false)
     private boolean favorite;
 
+    /**
+     * Saves one user to another's address book.
+     *
+     * <p>Called from {@code ContactService.addContact}. One-directional: adding
+     * someone does not add you to theirs.
+     */
     public Contact(UUID userId, UUID contactUserId) {
         this.userId = userId;
         this.contactUserId = contactUserId;
     }
 
+    /**
+     * The composite primary key, which enforces that a person can be saved only
+     * once per address book.
+     *
+     * <p>Required by JPA as a separate {@code Serializable} type for the
+     * {@code @IdClass}.
+     */
     public record Key(UUID userId, UUID contactUserId) implements Serializable {
     }
 }

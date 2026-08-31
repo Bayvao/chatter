@@ -25,6 +25,15 @@ public record MessageSent(
         String content,
         Instant sentAt) {
 
+    /**
+     * Captures a just-saved message as an event.
+     *
+     * <p>Called by {@code MessageService.send} while still inside the send
+     * transaction; {@code MessageBroadcaster} consumes it once that commits.
+     *
+     * <p>Carries the sender's snapshotted name rather than an id, so the
+     * broadcaster can build a push notification without a second lookup.
+     */
     public static MessageSent from(Message message) {
         return new MessageSent(
                 Ids.newId(),

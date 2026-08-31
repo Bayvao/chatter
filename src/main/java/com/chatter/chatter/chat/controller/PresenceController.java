@@ -26,16 +26,38 @@ public class PresenceController {
         this.presenceStore = presenceStore;
     }
 
+    /**
+     * Presence for one user.
+     *
+     * <p>Used when opening a conversation, to render the header before any
+     * {@code /topic/presence} event has arrived.
+     */
     @GetMapping("/{userId}")
     public PresenceDTO presenceOf(@PathVariable UUID userId) {
         return toDto(userId);
     }
 
+    /**
+     * Presence for several users at once.
+     *
+     * <p>Called after the chat list loads, with every conversation partner in
+     * one request — the alternative is one request per row in the sidebar.
+     *
+     * <p>Any authenticated user may ask about any other: presence is not
+     * access-controlled here, which is worth revisiting if users ever need to
+     * appear offline.
+     */
     @GetMapping
     public List<PresenceDTO> presenceOf(@RequestParam("userIds") List<UUID> userIds) {
         return userIds.stream().map(this::toDto).toList();
     }
 
+    /**
+     * Reads both halves of presence — online now, and last seen — into one DTO.
+     *
+     * <p>Shared by the two endpoints above. A null {@code lastSeen} is normal
+     * for someone who has never connected.
+     */
     private PresenceDTO toDto(UUID userId) {
         return new PresenceDTO(userId, presenceStore.isOnline(userId),
                 presenceStore.lastSeen(userId).orElse(null));

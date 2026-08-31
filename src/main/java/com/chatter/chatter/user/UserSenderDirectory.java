@@ -24,6 +24,20 @@ public class UserSenderDirectory implements SenderDirectory {
         this.userRepository = userRepository;
     }
 
+    /**
+     * {@inheritDoc}
+     *
+     * <p>Called by {@code MessageService.send} to snapshot the sender's name
+     * onto a new message, and by {@code ChatService} to name the other party in
+     * a 1:1 conversation. This is the only route from chat code to a user row.
+     *
+     * <p>The version travels with the name so the snapshot can reject a stale
+     * profile update that arrives out of order.
+     *
+     * @throws UserNotFoundException if no such user exists — which is also how
+     *         {@code getOrCreateDirectChat} rejects a chat with a nonexistent
+     *         person
+     */
     @Override
     @Transactional(readOnly = true)
     public Sender lookup(UUID userId) {

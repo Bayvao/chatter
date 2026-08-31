@@ -15,8 +15,14 @@ import com.chatter.chatter.chat.model.Chat;
 public interface ChatRepository extends JpaRepository<Chat, UUID> {
 
     /**
-     * The direct chat between two users, found through participant rows
-     * rather than user1_id/user2_id columns.
+     * The existing 1:1 chat between two users, if there is one.
+     *
+     * <p>Used by {@code ChatService.getOrCreateDirectChat}, and the reason
+     * opening a chat twice reuses the conversation rather than forking history.
+     *
+     * <p>Found through participant rows rather than {@code user1_id}/
+     * {@code user2_id} columns: those would need normalising by id order on
+     * every read and could not extend to group chats, which share this table.
      */
     @Query("""
             select c from Chat c
@@ -28,6 +34,15 @@ public interface ChatRepository extends JpaRepository<Chat, UUID> {
             """)
     Optional<Chat> findDirectChatBetween(@Param("userA") UUID userA, @Param("userB") UUID userB);
 
+    /**
+     * Every chat a user is currently in, most recently active first.
+     *
+     * <p>Backs the sidebar via {@code ChatService.listChatsFor}.
+     *
+     * <p>{@code nulls last} matters: a chat created but never used has no
+     * {@code lastMessageAt}, and without it those would sort to the top on
+     * Postgres, pushing live conversations down.
+     */
     @Query("""
             select c from Chat c
             where exists (select 1 from ChatParticipant p

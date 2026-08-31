@@ -12,6 +12,14 @@ import com.chatter.chatter.user.model.User;
 import com.chatter.chatter.user.model.UserProfile;
 import com.chatter.chatter.user.repository.UserProfileRepository;
 
+/**
+ * Profile reads and edits, split across two tables on purpose.
+ *
+ * <p>{@code users} holds the few fields the chat module snapshots onto every
+ * message (display name, avatar); {@code user_profiles} holds everything else
+ * (bio, phone, location). Only a change to the first kind needs to ripple
+ * outwards, which is why this class distinguishes them.
+ */
 @Service
 @Transactional(readOnly = true)
 public class ProfileService {
@@ -27,16 +35,31 @@ public class ProfileService {
         this.eventPublisher = eventPublisher;
     }
 
+    /**
+     * The extended profile for a user, or {@code null} if they have never saved
+     * one.
+     *
+     * <p>Used by {@code UserController} wherever a {@code ProfileDTO} is built.
+     * Null rather than empty is fine here because {@code ProfileDTO.from}
+     * already treats a missing profile as "all extended fields blank" — most
+     * users never fill any of them in.
+     */
     public UserProfile getProfile(UUID userId) {
         return profileRepository.findById(userId).orElse(null);
     }
 
     /**
-     * Null fields are left untouched, so a client can patch a single field.
+     * Applies a partial profile edit, creating the extended profile row on first
+     * save.
+     *
+     * <p>Used by {@code UserController.updateProfile}, the only writer. Null
+     * fields are left untouched, so a client can patch a single field without
+     * having to send the whole profile back.
      *
      * <p>When a display field actually changes, bumps {@code users.version} and
-     * publishes {@link UserProfileChanged} — that version is what lets the chat
-     * module's denormalised sender snapshot reject stale updates.
+     * publishes {@link UserProfileChanged}. That version is what lets the chat
+     * module's denormalised sender snapshot reject stale updates: two edits
+     * racing can arrive out of order, and the lower version loses.
      */
     @Transactional
     public User updateProfile(UUID userId, UpdateProfileRequest request) {
@@ -57,6 +80,15 @@ public class ProfileService {
         return user;
     }
 
+    /**
+     * Copies the snapshotted fields onto the user, reporting whether any
+     * actually changed.
+     *
+     * <p>The return value drives the version bump and the event in
+     * {@link #updateProfile}, so the comparison has to be by value: saving a
+     * profile form unchanged must not republish and rewrite sender snapshots
+     * across every message the user has ever sent.
+     */
     private boolean applyDisplayFields(User user, UpdateProfileRequest request) {
         boolean changed = false;
 
@@ -82,6 +114,13 @@ public class ProfileService {
         return changed;
     }
 
+    /**
+     * Copies the non-snapshotted fields onto the extended profile row.
+     *
+     * <p>Returns nothing because none of these fields are denormalised anywhere:
+     * changing a bio affects only this row, so there is no change signal for
+     * {@link #updateProfile} to act on.
+     */
     private void applyExtendedFields(UserProfile profile, UpdateProfileRequest request) {
         if (request.phoneNumber() != null) {
             profile.setPhoneNumber(request.phoneNumber());

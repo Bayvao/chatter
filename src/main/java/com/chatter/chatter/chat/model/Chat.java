@@ -42,6 +42,14 @@ public class Chat {
     @Column(name = "last_message_at")
     private Instant lastMessageAt;
 
+    /**
+     * Builds a 1:1 conversation.
+     *
+     * <p>Called from {@code ChatService} when two people first message each
+     * other. Carries no title or avatar of its own — a direct chat is named
+     * after whichever participant you are not, resolved per viewer in
+     * {@code ChatService.toDto}.
+     */
     public static Chat directChat(UUID createdBy) {
         Chat chat = new Chat();
         chat.id = Ids.newId();

@@ -50,6 +50,16 @@ public class PushSubscription {
     @Column(name = "last_used_at")
     private Instant lastUsedAt;
 
+    /**
+     * Records a browser's Web Push registration.
+     *
+     * <p>Called from {@code PushSubscriptionService.subscribe} when no row for
+     * the endpoint exists yet.
+     *
+     * <p>The two keys are the browser's, not ours: {@code p256dhKey} is its
+     * public key and {@code authSecret} a shared secret, and together they are
+     * what {@code WebPushSender} encrypts each payload for.
+     */
     public PushSubscription(UUID userId, String endpoint, String p256dhKey, String authSecret, String userAgent) {
         this.id = Ids.newId();
         this.userId = userId;
