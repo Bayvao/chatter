@@ -86,10 +86,54 @@ including both WebSocket authorization refusals.
 | `POST` | `/api/chats/messages` | Send without a live socket |
 | `POST` | `/api/chats/{chatId}/messages/{messageId}/read` | Mark read |
 | `DELETE` | `/api/chats/{chatId}/messages/{messageId}` | Soft delete |
+| `GET` | `/api/presence/{userId}` | Online flag and last seen |
+| `GET` | `/api/presence?userIds=a,b` | The same, in bulk |
+| `GET` | `/api/push/public-key` | VAPID public key, and whether push is on |
+| `POST` | `/api/push/subscriptions` | Register a browser for Web Push |
+| `DELETE` | `/api/push/subscriptions` | Retire one, on sign-out |
 
 WebSocket: connect to `/ws`, send to `/app/chat.send`, subscribe to
 `/topic/chats/{chatId}`. The handshake is unauthenticated; the JWT goes on the
 STOMP `CONNECT` frame, and `SUBSCRIBE` is checked for chat membership.
+
+| Destination | Purpose |
+|---|---|
+| `/topic/presence` | Someone connected or disconnected |
+| `/app/sync.start` | `{cursors: {chatId: seq}}` — catch up after a drop |
+| `/user/queue/sync-batch` | Missed messages, 50 per frame |
+| `/user/queue/sync-complete` | `{messageCount}` when the backfill is done |
+
+### Presence, delivery status and catch-up
+
+Presence lives in Redis as a TTL key, not as a column on `users`. A server that
+dies cannot leave anyone stuck showing "online", because the key expires by
+itself. With `PRESENCE_REDIS_ENABLED=false` (the default, and what the tests
+use) an in-memory store stands in, which is correct for a single instance.
+
+On send, each recipient is checked: online recipients get the message over the
+socket and it is marked `DELIVERED`; offline ones leave it `SENT` and get a push
+notification. Nothing is queued anywhere — every message is already durable in
+Postgres with a per-chat `seq`, so a reconnecting client asks for
+`seq > cursor` and gets exactly what it missed. Cursors rather than timestamps:
+clocks drift, and two messages can share a millisecond.
+
+### Web Push
+
+Notifications use Web Push (RFC 8030/8291) with VAPID and a service worker —
+no Firebase, no third-party messaging account. The browser nominates its own
+push service; we encrypt for the subscription's key and sign with ours.
+
+```bash
+npx web-push generate-vapid-keys      # prints a public/private pair
+
+export VAPID_ENABLED=true
+export VAPID_PUBLIC_KEY=...           # the client fetches this one
+export VAPID_PRIVATE_KEY=...          # keep it out of version control
+docker compose up
+```
+
+Browsers only permit push over HTTPS, or on `localhost`. Left disabled, the app
+works unchanged and `LoggingPushSender` logs what it would have sent.
 
 ## Configuration
 
@@ -100,10 +144,15 @@ STOMP `CONNECT` frame, and `SUBSCRIBE` is checked for chat membership.
 | `JWT_SECRET` | dev-only placeholder — **override outside local dev** |
 | `JWT_EXPIRATION_MS` | `86400000` (24h) |
 | `CORS_ALLOWED_ORIGINS` | `http://localhost:3000` |
+| `PRESENCE_REDIS_ENABLED` | `false` — `true` under `docker compose` |
+| `REDIS_HOST` / `REDIS_PORT` | `localhost` / `6379` |
+| `VAPID_ENABLED` | `false` — push is off until keys are supplied |
+| `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` | empty |
+| `VAPID_SUBJECT` | `mailto:admin@example.com` |
 
 ## Next
 
-Phase 2 adds profiles, contacts and search; Phase 3 adds presence, offline
-queueing and push. Partitioning, the transactional outbox and Kafka arrive in
-Phases 3.5 and 5 — the schema and event shapes here are already aligned with
-them.
+Phases 1–3 are in: auth, direct chat, real-time delivery, profiles, contacts
+and search, then presence, delivery status, reconnect sync and Web Push.
+Partitioning, the transactional outbox and Kafka arrive in Phases 3.5 and 5 —
+the schema and event shapes here are already aligned with them.

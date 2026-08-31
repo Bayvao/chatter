@@ -15,6 +15,16 @@ services:
       timeout: 5s
       retries: 5
 
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   backend:
     build:
       context: .
@@ -23,6 +33,8 @@ services:
       - "8080:8080"
     depends_on:
       postgres:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     environment:
       DB_HOST: postgres
@@ -33,6 +45,20 @@ services:
       CORS_ALLOWED_ORIGINS: http://localhost:3000
       # Override for anything beyond local development.
       JWT_SECRET: local-dev-secret-key-at-least-256-bits-long-not-for-production
+      # Presence as TTL keys rather than a status column: a server that dies
+      # cannot leave anyone stuck "online", because the key expires by itself.
+      PRESENCE_REDIS_ENABLED: "true"
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      # Web Push is off until you supply a VAPID keypair. Generate one with:
+      #   npx web-push generate-vapid-keys
+      # then export VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY in your shell rather
+      # than committing them here. Browsers only allow push over HTTPS or on
+      # localhost. Left off, LoggingPushSender takes over and logs instead.
+      VAPID_ENABLED: "${VAPID_ENABLED:-false}"
+      VAPID_PUBLIC_KEY: "${VAPID_PUBLIC_KEY:-}"
+      VAPID_PRIVATE_KEY: "${VAPID_PRIVATE_KEY:-}"
+      VAPID_SUBJECT: "${VAPID_SUBJECT:-mailto:admin@example.com}"
 
   frontend:
     build:

@@ -82,6 +82,18 @@ public class WebSocketSteps {
         context.setReceivedMessage(message);
     }
 
+    @When("{string} disconnects from WebSocket")
+    public void disconnects(String username) throws Exception {
+        openSessions.forEach(session -> {
+            if (session.isConnected()) {
+                session.disconnect();
+            }
+        });
+        openSessions.clear();
+        // SessionDisconnectEvent is dispatched asynchronously by the broker.
+        Thread.sleep(500);
+    }
+
     @When("a WebSocket connection is attempted without a token")
     public void connectWithoutToken() {
         connectionFailure = catchThrowable(() -> connect(null));

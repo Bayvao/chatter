@@ -43,6 +43,24 @@ dependencies {
 	// them the way random UUIDv4 does.
 	implementation("com.fasterxml.uuid:java-uuid-generator:5.2.0")
 
+	// Presence lives in Redis as TTL keys in deployed environments; the
+	// in-memory PresenceStore is the default so tests and a bare `bootRun`
+	// need no Redis.
+	implementation("org.springframework.boot:spring-boot-starter-data-redis")
+
+	// Web Push (RFC 8030/8291) — VAPID-signed, encrypted payloads sent
+	// straight to the browser's push service. No Firebase account needed.
+	implementation("nl.martijndwars:web-push:5.1.2") {
+		// Ships the deprecated bcprov-jdk15on 1.70, which carries known CVEs.
+		exclude(group = "org.bouncycastle", module = "bcprov-jdk15on")
+	}
+	implementation("org.bouncycastle:bcprov-jdk18on:1.85.2")
+	// web-push exposes both of these on its send() signature but declares them
+	// runtime-only: httpcore for the HttpResponse whose status code tells us to
+	// retire a dead subscription, jose4j for the checked JoseException.
+	implementation("org.apache.httpcomponents:httpcore:4.4.16")
+	implementation("org.bitbucket.b_c:jose4j:0.9.6")
+
 	implementation("io.jsonwebtoken:jjwt-api:${property("jjwtVersion")}")
 	runtimeOnly("io.jsonwebtoken:jjwt-impl:${property("jjwtVersion")}")
 	runtimeOnly("io.jsonwebtoken:jjwt-jackson:${property("jjwtVersion")}")
