@@ -38,9 +38,6 @@ public class Contact {
     @Column(name = "added_at", nullable = false)
     private Instant addedAt = Instant.now();
 
-    @Column(name = "is_blocked", nullable = false)
-    private boolean blocked;
-
     @Column(name = "is_favorite", nullable = false)
     private boolean favorite;
 

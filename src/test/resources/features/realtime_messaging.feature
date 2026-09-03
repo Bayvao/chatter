@@ -6,6 +6,7 @@ Feature: Real-time message delivery
   Background:
     Given "alice" is a registered user
     And "bob" is a registered user
+    And "alice" and "bob" are contacts
     And "alice" has opened a chat with "bob"
 
   Scenario: A subscriber receives a message pushed over WebSocket

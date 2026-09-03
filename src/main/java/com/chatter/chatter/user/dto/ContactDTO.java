@@ -5,7 +5,7 @@ import java.time.Instant;
 import com.chatter.chatter.user.model.Contact;
 import com.chatter.chatter.user.model.User;
 
-public record ContactDTO(UserDTO user, Instant addedAt, boolean blocked, boolean favorite) {
+public record ContactDTO(UserDTO user, Instant addedAt, boolean favorite) {
 
     /**
      * Joins a contact row to the live user it points at.
@@ -16,7 +16,6 @@ public record ContactDTO(UserDTO user, Instant addedAt, boolean blocked, boolean
      * or avatar render with the current one.
      */
     public static ContactDTO from(Contact contact, User contactUser) {
-        return new ContactDTO(UserDTO.from(contactUser), contact.getAddedAt(), contact.isBlocked(),
-                contact.isFavorite());
+        return new ContactDTO(UserDTO.from(contactUser), contact.getAddedAt(), contact.isFavorite());
     }
 }

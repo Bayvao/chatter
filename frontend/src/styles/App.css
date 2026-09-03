@@ -204,14 +204,29 @@ button.link {
   background: #fbfcfd;
 }
 
+/* The row owns its padding, separator and selected state, not the button
+   inside it. Both lists carry a trailing action (Leave, Add friend), so with
+   these on the button the separator stopped short of that action, the selected
+   highlight covered only part of the row, and `width: 100%` fought the flex
+   sibling for space. */
+.search-results li,
+.chats li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
 .search-results button,
-.chats button {
-  width: 100%;
+.chats button,
+.search-name {
+  flex: 1;
+  min-width: 0;
   text-align: left;
   background: none;
   border: none;
-  border-bottom: 1px solid var(--border);
-  padding: 12px 14px;
+  padding: 0;
   position: relative;
 }
 
@@ -220,7 +235,8 @@ button.link {
   flex: 1;
 }
 
-.chats button.active {
+/* On the row, so the highlight spans the trailing action too. */
+.chats li:has(button.active) {
   background: #eef2ff;
 }
 
@@ -440,14 +456,10 @@ button.link {
   font-size: 13px;
 }
 
-.search-results li {
-  display: flex;
-  align-items: center;
-}
 
-.search-results .add-contact {
-  flex-shrink: 0;
-  padding-right: 14px;
+.search-results .add-contact,
+.search-results .requested {
+  flex: none;
   font-size: 13px;
 }
 
@@ -495,4 +507,74 @@ button.link {
   background: var(--accent);
   color: var(--accent-contrast);
   font-weight: 600;
+}
+
+/* Search results and chat rows now carry a trailing action, so the row is a
+   flex line rather than a single full-width button. */
+.search-name {
+  flex: 1;
+  text-align: left;
+}
+
+.requested {
+  font-size: 12px;
+  font-style: italic;
+}
+
+/* The composer is replaced by this when a block stands between the two
+   parties, so the reason is visible rather than the send silently failing. */
+.blocked-notice {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 16px;
+  border-top: 1px solid var(--border);
+  background: var(--danger-bg);
+  color: var(--danger);
+  font-size: 13px;
+}
+
+.blocked-notice button {
+  margin-left: auto;
+  flex: none;
+  border: none;
+  background: none;
+  color: var(--accent);
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.requests h3 {
+  margin: 12px 12px 4px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+.requests ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.requests li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+}
+
+
+/* Kept quiet: leaving is destructive-ish and should not compete with opening
+   the conversation, which is what the row is mostly for. */
+.leave-chat {
+  flex: none;
+  padding: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.leave-chat:hover {
+  color: var(--danger);
 }

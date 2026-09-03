@@ -80,12 +80,19 @@ including both WebSocket authorization refusals.
 | `GET` | `/api/auth/me` | The signed-in user |
 | `GET` | `/api/users/search?q=` | Find someone to chat with |
 | `GET` | `/api/chats` | Conversations, with unread counts |
+| `DELETE` | `/api/chats/{chatId}` | Leave a conversation |
 | `POST` | `/api/chats/with/{userId}` | Open (or reuse) a direct chat |
 | `GET` | `/api/chats/{chatId}/messages` | History, newest first |
 | `GET` | `/api/chats/{chatId}/messages/since?afterSeq=` | Reconnect sync |
 | `POST` | `/api/chats/messages` | Send without a live socket |
 | `POST` | `/api/chats/{chatId}/messages/{messageId}/read` | Mark read |
 | `DELETE` | `/api/chats/{chatId}/messages/{messageId}` | Soft delete |
+| `POST` | `/api/users/me/contacts/{userId}` | Send a friend request |
+| `GET` | `/api/users/me/contacts/requests` | Incoming requests |
+| `GET` | `/api/users/me/contacts/requests/sent` | Requests you have sent |
+| `POST` | `/api/users/me/contacts/{userId}/accept` | Accept a request |
+| `DELETE` | `/api/users/me/contacts/{userId}/decline` | Decline, or cancel your own |
+| `GET` | `/api/users/me/blocked` | Users you have blocked |
 | `GET` | `/api/presence/{userId}` | Online flag and last seen |
 | `GET` | `/api/presence?userIds=a,b` | The same, in bulk |
 | `GET` | `/api/push/public-key` | VAPID public key, and whether push is on |
@@ -102,6 +109,63 @@ STOMP `CONNECT` frame, and `SUBSCRIBE` is checked for chat membership.
 | `/app/sync.start` | `{cursors: {chatId: seq}}` — catch up after a drop |
 | `/user/queue/sync-batch` | Missed messages, 50 per frame |
 | `/user/queue/sync-complete` | `{messageCount}` when the backfill is done |
+| `/user/queue/contacts` | Friend requests, accepts, declines and removals |
+
+### Friend requests
+
+A chat cannot be opened with a stranger. `POST /api/chats/with/{userId}` returns
+403 unless the two are accepted contacts, which is enforced through the
+`RelationshipDirectory` port rather than by the chat module reading contacts
+directly.
+
+Pending requests live in their own table keyed by the **unordered pair**, so a
+plain `UNIQUE` constraint guarantees one request per pair whichever direction it
+came from. Two consequences fall out of that:
+
+- Two people clicking "Add friend" on each other at the same instant become
+  contacts, rather than one of them failing arbitrarily — the loser of the
+  constraint race sees the reciprocal request and accepts it.
+- Clicking twice yourself is a 409, not a duplicate.
+
+Changes relay live on `/user/queue/contacts`, so a request appears without a
+reload. Delivery is best effort: a user destination with nobody connected drops,
+and the REST lists above remain the source of truth on load. **Blocking is never
+relayed to the person blocked** — telling someone they were blocked hands a
+harasser the signal that their target acted.
+
+### Blocking
+
+A block bars contact outright, in **both directions**, until it is lifted:
+neither party can send in an existing conversation, open a new one, or send a
+friend request, and each disappears from the other's search results.
+
+Blocks live in `app_user.blocks`, not as a flag on the contact row. The flag
+conflated two things with different lifetimes — an address-book entry is mutual
+and disposable, a ban is one-directional and must outlive everything — so
+removing a contact silently discarded the block, and a stranger could not be
+blocked at all. Now removing a contact leaves the block untouched, and anyone
+can be blocked whether or not you ever added them.
+
+Blocking does not delete the friendship or the conversation; unblocking
+restores both. **Existing history stays readable** — blocking stops new contact
+rather than seizing back what someone was already shown.
+
+The person blocked is never told. `GET /me/blocked` reports only blocks you
+hold yourself, and search hides both directions so a blocked user cannot find
+their way back to a request button. A send they attempt is refused with a
+message on `/user/queue/errors`, which is how their client explains the failure
+without disclosing who acted.
+
+### Leaving a chat
+
+`DELETE /api/chats/{chatId}` stamps `left_at` on your participant row. That one
+write is the whole behaviour, because every membership query already filters on
+it — the chat leaves your list, sends and history return 403, STOMP SUBSCRIBE is
+refused, and the broadcaster stops delivering to you.
+
+It hides rather than deletes. Messages and your read cursor survive, so opening
+a chat with the same person **rejoins the original conversation** rather than
+forking a second one alongside it.
 
 ### Presence, delivery status and catch-up
 
@@ -153,6 +217,7 @@ works unchanged and `LoggingPushSender` logs what it would have sent.
 ## Next
 
 Phases 1–3 are in: auth, direct chat, real-time delivery, profiles, contacts
-and search, then presence, delivery status, reconnect sync and Web Push.
+and search, then presence, delivery status, reconnect sync and Web Push, plus
+friend requests and leaving a chat.
 Partitioning, the transactional outbox and Kafka arrive in Phases 3.5 and 5 —
 the schema and event shapes here are already aligned with them.

@@ -6,6 +6,7 @@ Feature: Presence
   Background:
     Given "alice" is a registered user
     And "bob" is a registered user
+    And "alice" and "bob" are contacts
 
   Scenario: A user is offline before connecting
     Then "bob" should be offline

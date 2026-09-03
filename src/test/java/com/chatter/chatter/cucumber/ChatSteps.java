@@ -46,6 +46,12 @@ public class ChatSteps {
         assertThat(context.getCurrentChatId()).isNotNull();
     }
 
+    @When("{string} leaves the chat")
+    public void leavesChat(String username) {
+        context.setLastResponse(rest.exchange("/api/chats/" + context.getCurrentChatId(), HttpMethod.DELETE,
+                new HttpEntity<>(authHeaders(context.tokenFor(username))), String.class));
+    }
+
     @Then("{string} should see {int} chat(s)")
     public void shouldSeeChats(String username, int expectedCount) throws Exception {
         var response = rest.exchange("/api/chats", HttpMethod.GET,

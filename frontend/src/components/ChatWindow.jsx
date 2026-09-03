@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useAuthStore } from '../store/authStore';
 import { useChatStore } from '../store/chatStore';
+import { useContactStore } from '../store/contactStore';
 import websocket from '../services/websocket';
 import { disablePush, enablePush } from '../services/push';
 import ChatList from './ChatList';
@@ -25,18 +26,31 @@ export default function ChatWindow() {
     selectChat,
     reset,
   } = useChatStore();
+  const {
+    loadAll: loadContacts,
+    receiveEvent,
+    reset: resetContacts,
+    isBlocked,
+    unblock,
+  } = useContactStore();
   const bottomRef = useRef(null);
   const [sidebarTab, setSidebarTab] = useState('chats');
   const [showProfile, setShowProfile] = useState(false);
+  const [sendError, setSendError] = useState(null);
 
   useEffect(() => {
     loadChats();
+    loadContacts();
 
     websocket.connect(token, {
       onConnect: () => {
         loadChats();
         websocket.subscribeToPresence(setPresence);
         websocket.subscribeToSync({ onBatch: receiveSyncBatch });
+        // Friend requests land here without a reload; the REST lists loaded
+        // below remain the source of truth for anything missed while away.
+        websocket.subscribeToContacts(receiveEvent);
+        websocket.subscribeToErrors((payload) => setSendError(payload.message));
       },
       // The socket drops silently; this is where anything sent in the gap is
       // recovered. Cursors are read at fire time, not closed over.
@@ -48,7 +62,7 @@ export default function ChatWindow() {
     enablePush();
 
     return () => websocket.disconnect();
-  }, [token, loadChats, receiveSyncBatch, setPresence]);
+  }, [token, loadChats, loadContacts, receiveEvent, receiveSyncBatch, setPresence]);
 
   // The service worker focuses this tab on a notification click and tells us
   // which conversation it was for.
@@ -89,6 +103,10 @@ export default function ChatWindow() {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
+  // A refusal belongs to the conversation it happened in; carrying it into the
+  // next one would blame the wrong chat.
+  useEffect(() => setSendError(null), [activeChatId]);
+
   const activeChat = chats.find((chat) => chat.id === activeChatId);
 
   const onLogout = async () => {
@@ -97,6 +115,7 @@ export default function ChatWindow() {
     await disablePush();
     websocket.disconnect();
     reset();
+    resetContacts();
     logout();
   };
 
@@ -163,7 +182,32 @@ export default function ChatWindow() {
                 <div ref={bottomRef} />
               </div>
 
-              <MessageInput chatId={activeChatId} disabled={loadingMessages} />
+              {/*
+                A block bars sending in both directions, so the composer is
+                replaced rather than left to fail. Only a block we hold can be
+                shown — the server never reveals one held against us, so that
+                case surfaces as an error on send instead.
+              */}
+              {activeChat?.otherUserId && isBlocked(activeChat.otherUserId) ? (
+                <div className="blocked-notice">
+                  <span>You blocked this person. Unblock to send messages.</span>
+                  <button type="button" onClick={() => unblock(activeChat.otherUserId)}>
+                    Unblock
+                  </button>
+                </div>
+              ) : (
+                <>
+                  {sendError && (
+                    <div className="blocked-notice">
+                      <span>{sendError}</span>
+                      <button type="button" onClick={() => setSendError(null)}>
+                        Dismiss
+                      </button>
+                    </div>
+                  )}
+                  <MessageInput chatId={activeChatId} disabled={loadingMessages} />
+                </>
+              )}
             </>
           )}
         </main>

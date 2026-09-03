@@ -55,6 +55,29 @@ class WebSocketService {
     this.subscriptions.delete(chatId);
   }
 
+  /**
+   * Relationship changes addressed to this user: requests, accepts, declines
+   * and removals.
+   *
+   * <p>A user destination, so Spring scopes it to this session and nobody else
+   * can subscribe to it. Best effort — an event fired while this client was
+   * disconnected is simply missed, and the REST lists cover that on next load.
+   */
+  subscribeToContacts(callback) {
+    return this.subscribe('contacts', '/user/queue/contacts', callback);
+  }
+
+  /**
+   * Failures the server could not answer inline — a send refused because a
+   * block stands between the two parties, most of all.
+   *
+   * <p>Without this the refusal arrives as a STOMP ERROR frame and the session
+   * closes, so the client sees a dropped connection rather than a reason.
+   */
+  subscribeToErrors(callback) {
+    return this.subscribe('errors', '/user/queue/errors', callback);
+  }
+
   /** Connect/disconnect of every user, broadcast server-side on session events. */
   subscribeToPresence(callback) {
     return this.subscribe('presence', '/topic/presence', callback);

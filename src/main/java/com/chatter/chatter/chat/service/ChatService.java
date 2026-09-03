@@ -2,6 +2,7 @@ package com.chatter.chatter.chat.service;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 import org.springframework.data.domain.PageRequest;
@@ -10,12 +11,14 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.chatter.chatter.chat.dto.ChatDTO;
 import com.chatter.chatter.chat.exception.ChatNotFoundException;
+import com.chatter.chatter.chat.exception.NotConnectedException;
 import com.chatter.chatter.chat.exception.NotAParticipantException;
 import com.chatter.chatter.chat.model.Chat;
 import com.chatter.chatter.chat.model.ChatCounter;
 import com.chatter.chatter.chat.model.ChatParticipant;
 import com.chatter.chatter.chat.model.Message;
 import com.chatter.chatter.chat.model.ParticipantRole;
+import com.chatter.chatter.chat.port.RelationshipDirectory;
 import com.chatter.chatter.chat.port.SenderDirectory;
 import com.chatter.chatter.chat.repository.ChatCounterRepository;
 import com.chatter.chatter.chat.repository.ChatParticipantRepository;
@@ -39,15 +42,17 @@ public class ChatService {
     private final ChatCounterRepository counterRepository;
     private final MessageRepository messageRepository;
     private final SenderDirectory senderDirectory;
+    private final RelationshipDirectory relationshipDirectory;
 
     public ChatService(ChatRepository chatRepository, ChatParticipantRepository participantRepository,
                         ChatCounterRepository counterRepository, MessageRepository messageRepository,
-                        SenderDirectory senderDirectory) {
+                        SenderDirectory senderDirectory, RelationshipDirectory relationshipDirectory) {
         this.chatRepository = chatRepository;
         this.participantRepository = participantRepository;
         this.counterRepository = counterRepository;
         this.messageRepository = messageRepository;
         this.senderDirectory = senderDirectory;
+        this.relationshipDirectory = relationshipDirectory;
     }
 
     /**
@@ -58,7 +63,17 @@ public class ChatService {
      * person twice reuses the existing conversation instead of forking a second
      * one, so history never splits.
      *
+     * <p>Requires the two to be contacts. Before that check existed, a chat
+     * could be opened with any user id at all, so a friend request appeared to
+     * be accepted the moment it was sent.
+     *
+     * <p>Looks for an existing chat <em>including</em> ones the caller has left,
+     * and rejoins it. Searching only active pairs would find nothing after a
+     * leave and create a second chat, splitting the conversation while the other
+     * party still sits in the first.
+     *
      * @throws IllegalArgumentException if both ids are the same
+     * @throws NotConnectedException if the two are not contacts
      * @throws com.chatter.chatter.user.exception.UserNotFoundException if the
      *         other user does not exist
      */
@@ -71,8 +86,63 @@ public class ChatService {
         // through the port, not by reaching into the user repository.
         senderDirectory.lookup(otherUserId);
 
-        return chatRepository.findDirectChatBetween(currentUserId, otherUserId)
+        if (!relationshipDirectory.areConnected(currentUserId, otherUserId)) {
+            throw new NotConnectedException(otherUserId);
+        }
+
+        return chatRepository.findDirectChatBetweenIncludingLeft(currentUserId, otherUserId)
+                .map(chat -> rejoin(chat, currentUserId))
                 .orElseGet(() -> createDirectChat(currentUserId, otherUserId));
+    }
+
+    /**
+     * Clears {@code left_at} for anyone reopening a chat they had left.
+     *
+     * <p>Called from {@link #getOrCreateDirectChat}. A no-op for the ordinary
+     * case where the caller never left, which is why it sits on the found-chat
+     * path rather than behind a branch.
+     */
+    private Chat rejoin(Chat chat, UUID userId) {
+        participantRepository.findByChatIdAndUserId(chat.getId(), userId)
+                .ifPresent(ChatParticipant::rejoin);
+        return chat;
+    }
+
+    /**
+     * The other participant in a direct chat, if there is exactly one.
+     *
+     * <p>Used by {@code MessageService.send} to find who a 1:1 message is
+     * actually going to, so the block between them can be checked. Empty for a
+     * group, which has no single counterpart and is deliberately not gated on
+     * any relationship.
+     */
+    public Optional<UUID> otherParticipant(UUID chatId, UUID userId) {
+        List<UUID> others = participantRepository.findByChatIdAndLeftAtIsNull(chatId).stream()
+                .map(ChatParticipant::getUserId)
+                .filter(id -> !id.equals(userId))
+                .toList();
+
+        return others.size() == 1 ? Optional.of(others.get(0)) : Optional.empty();
+    }
+
+    /**
+     * Removes the caller from a chat, hiding it without deleting anything.
+     *
+     * <p>Used by {@code ChatController.leaveChat}. Stamping {@code left_at} is
+     * the whole behaviour, because every read already filters on it: the chat
+     * leaves their list, {@link #requireActiveMember} starts failing so REST
+     * send and history return 403, STOMP SUBSCRIBE is refused, and
+     * {@code MessageBroadcaster} stops delivering to them.
+     *
+     * <p>Messages and {@code last_read_seq} survive, so reopening the chat
+     * rejoins it with history intact rather than starting afresh.
+     *
+     * @throws NotAParticipantException if they are not an active member
+     */
+    @Transactional
+    public void leaveChat(UUID chatId, UUID userId) {
+        requireActiveMember(chatId, userId);
+        participantRepository.findByChatIdAndUserId(chatId, userId).ifPresent(ChatParticipant::leave);
     }
 
     /**

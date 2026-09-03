@@ -6,6 +6,7 @@ Feature: Delivery status and reconnect sync
   Background:
     Given "alice" is a registered user
     And "bob" is a registered user
+    And "alice" and "bob" are contacts
     And "alice" has opened a chat with "bob"
 
   Scenario: A message to an offline recipient stays SENT

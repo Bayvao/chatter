@@ -159,4 +159,22 @@ public class ChatController {
         messageService.softDelete(chatId, principal.id(), messageId);
         return ResponseEntity.noContent().build();
     }
+
+    /**
+     * Leaves a chat, removing it from the caller's list.
+     *
+     * <p>Used by the Leave action on a conversation. Hides rather than deletes:
+     * the messages stay, and reopening the chat with the same person rejoins
+     * this conversation with its history rather than starting a new one.
+     *
+     * <p>After this, sending to the chat returns 403, its history is refused,
+     * a STOMP SUBSCRIBE to its topic is rejected, and messages the other party
+     * sends are no longer delivered to the caller.
+     */
+    @DeleteMapping("/{chatId}")
+    public ResponseEntity<Void> leaveChat(@AuthenticationPrincipal AuthenticatedUser principal,
+                                           @PathVariable UUID chatId) {
+        chatService.leaveChat(chatId, principal.id());
+        return ResponseEntity.noContent().build();
+    }
 }

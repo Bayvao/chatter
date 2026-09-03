@@ -6,6 +6,7 @@ Feature: One-to-one chat
   Background:
     Given "alice" is a registered user
     And "bob" is a registered user
+    And "alice" and "bob" are contacts
 
   Scenario: Opening a chat with another user
     When "alice" opens a chat with "bob"

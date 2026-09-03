@@ -27,10 +27,44 @@ public class ContactSteps {
     @Autowired
     private ObjectMapper objectMapper;
 
-    @When("{string} adds {string} as a contact")
-    public void addsContact(String username, String contactUsername) {
-        context.setLastResponse(rest.exchange("/api/users/me/contacts/" + context.userIdFor(contactUsername),
+    @When("{string} sends a contact request to {string}")
+    public void sendsRequest(String username, String targetUsername) {
+        context.setLastResponse(rest.exchange("/api/users/me/contacts/" + context.userIdFor(targetUsername),
                 HttpMethod.POST, new HttpEntity<>(authHeaders(context.tokenFor(username))), String.class));
+    }
+
+    @When("{string} accepts the contact request from {string}")
+    public void acceptsRequest(String username, String requesterUsername) {
+        context.setLastResponse(rest.exchange(
+                "/api/users/me/contacts/" + context.userIdFor(requesterUsername) + "/accept",
+                HttpMethod.POST, new HttpEntity<>(authHeaders(context.tokenFor(username))), String.class));
+    }
+
+    @When("{string} declines the contact request from {string}")
+    public void declinesRequest(String username, String otherUsername) {
+        context.setLastResponse(rest.exchange(
+                "/api/users/me/contacts/" + context.userIdFor(otherUsername) + "/decline",
+                HttpMethod.DELETE, new HttpEntity<>(authHeaders(context.tokenFor(username))), String.class));
+    }
+
+    /**
+     * The precondition almost every chat scenario now needs: opening a
+     * conversation requires an accepted friendship.
+     */
+    @When("{string} and {string} are contacts")
+    public void areContacts(String username, String otherUsername) {
+        sendsRequest(username, otherUsername);
+        acceptsRequest(otherUsername, username);
+    }
+
+    @Then("{string} should have {int} incoming contact request(s)")
+    public void shouldHaveIncomingRequests(String username, int expected) throws Exception {
+        assertThat(fetch(username, "/api/users/me/contacts/requests")).hasSize(expected);
+    }
+
+    @Then("{string} should have {int} outgoing contact request(s)")
+    public void shouldHaveOutgoingRequests(String username, int expected) throws Exception {
+        assertThat(fetch(username, "/api/users/me/contacts/requests/sent")).hasSize(expected);
     }
 
     @When("{string} removes {string} from contacts")
@@ -78,7 +112,11 @@ public class ContactSteps {
     }
 
     private JsonNode fetchContacts(String username) throws Exception {
-        var response = rest.exchange("/api/users/me/contacts", HttpMethod.GET,
+        return fetch(username, "/api/users/me/contacts");
+    }
+
+    private JsonNode fetch(String username, String path) throws Exception {
+        var response = rest.exchange(path, HttpMethod.GET,
                 new HttpEntity<>(authHeaders(context.tokenFor(username))), String.class);
         return objectMapper.readTree(response.getBody());
     }

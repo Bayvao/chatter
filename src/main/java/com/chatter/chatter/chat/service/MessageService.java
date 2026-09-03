@@ -10,11 +10,13 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.chatter.chatter.chat.event.MessageSent;
+import com.chatter.chatter.chat.exception.BlockedException;
 import com.chatter.chatter.chat.exception.ChatNotFoundException;
 import com.chatter.chatter.chat.model.Chat;
 import com.chatter.chatter.chat.model.ChatCounter;
 import com.chatter.chatter.chat.model.Message;
 import com.chatter.chatter.chat.model.SenderSnapshot;
+import com.chatter.chatter.chat.port.RelationshipDirectory;
 import com.chatter.chatter.chat.port.SenderDirectory;
 import com.chatter.chatter.chat.repository.ChatCounterRepository;
 import com.chatter.chatter.chat.repository.ChatRepository;
@@ -37,16 +39,19 @@ public class MessageService {
     private final ChatCounterRepository counterRepository;
     private final ChatService chatService;
     private final SenderDirectory senderDirectory;
+    private final RelationshipDirectory relationshipDirectory;
     private final ApplicationEventPublisher eventPublisher;
 
     public MessageService(MessageRepository messageRepository, ChatRepository chatRepository,
                            ChatCounterRepository counterRepository, ChatService chatService,
-                           SenderDirectory senderDirectory, ApplicationEventPublisher eventPublisher) {
+                           SenderDirectory senderDirectory, RelationshipDirectory relationshipDirectory,
+                           ApplicationEventPublisher eventPublisher) {
         this.messageRepository = messageRepository;
         this.chatRepository = chatRepository;
         this.counterRepository = counterRepository;
         this.chatService = chatService;
         this.senderDirectory = senderDirectory;
+        this.relationshipDirectory = relationshipDirectory;
         this.eventPublisher = eventPublisher;
     }
 
@@ -72,11 +77,13 @@ public class MessageService {
      * Broadcasting before commit would let a rolled-back message reach a screen.
      *
      * @throws NotAParticipantException if the sender is not in the chat
+     * @throws BlockedException if a block stands between the two parties
      * @throws ChatNotFoundException if the chat or its counter is missing
      */
     @Transactional
     public Message send(UUID chatId, UUID senderId, String content, UUID clientMsgId) {
         chatService.requireActiveMember(chatId, senderId);
+        requireNotBlocked(chatId, senderId);
 
         // Idempotency: a retry carrying the same client id returns the row it
         // already created rather than a duplicate.
@@ -106,6 +113,29 @@ public class MessageService {
         eventPublisher.publishEvent(MessageSent.from(message));
 
         return message;
+    }
+
+    /**
+     * Refuses a message when a block stands between the two parties.
+     *
+     * <p>Membership alone was the only check here, which is why a conversation
+     * carried on unchanged after someone was blocked: both sides were still
+     * participants, so both kept sending.
+     *
+     * <p>Direct chats only. A group is not a relationship, and gating one on a
+     * block between two of its members would be both wrong and, once groups
+     * exist properly in Phase 4, expensive.
+     *
+     * <p>Costs one participant lookup plus one indexed block query per 1:1
+     * send. The participant query is the same one {@code MessageBroadcaster}
+     * already makes on this path.
+     */
+    private void requireNotBlocked(UUID chatId, UUID senderId) {
+        chatService.otherParticipant(chatId, senderId)
+                .filter(otherId -> relationshipDirectory.isBlockedEitherWay(senderId, otherId))
+                .ifPresent(otherId -> {
+                    throw new BlockedException(chatId);
+                });
     }
 
     /**

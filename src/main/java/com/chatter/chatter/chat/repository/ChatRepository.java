@@ -35,9 +35,28 @@ public interface ChatRepository extends JpaRepository<Chat, UUID> {
     Optional<Chat> findDirectChatBetween(@Param("userA") UUID userA, @Param("userB") UUID userB);
 
     /**
+     * The 1:1 chat between two users, counting members who have left.
+     *
+     * <p>Used by {@code ChatService.getOrCreateDirectChat} in place of
+     * {@link #findDirectChatBetween}, which requires both sides active and so
+     * finds nothing once one has left — creating a second chat and splitting the
+     * conversation. This finds the original so the caller can rejoin it.
+     */
+    @Query("""
+            select c from Chat c
+            where c.group = false
+              and exists (select 1 from ChatParticipant p
+                          where p.chatId = c.id and p.userId = :userA)
+              and exists (select 1 from ChatParticipant p
+                          where p.chatId = c.id and p.userId = :userB)
+            """)
+    Optional<Chat> findDirectChatBetweenIncludingLeft(@Param("userA") UUID userA, @Param("userB") UUID userB);
+
+    /**
      * Every chat a user is currently in, most recently active first.
      *
-     * <p>Backs the sidebar via {@code ChatService.listChatsFor}.
+     * <p>Backs the sidebar via {@code ChatService.listChatsFor}. Chats the user
+     * has left drop out here, which is what makes leaving hide a conversation.
      *
      * <p>{@code nulls last} matters: a chat created but never used has no
      * {@code lastMessageAt}, and without it those would sort to the top on
