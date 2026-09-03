@@ -34,4 +34,16 @@ public class UserRelationshipDirectory implements RelationshipDirectory {
     public boolean areConnected(UUID userA, UUID userB) {
         return contactService.areConnected(userA, userB);
     }
+
+    /**
+     * {@inheritDoc}
+     *
+     * <p>On the send path, so it is one indexed query rather than the pair of
+     * contact reads {@link #areConnected} needs.
+     */
+    @Override
+    @Transactional(readOnly = true)
+    public boolean isBlockedEitherWay(UUID userA, UUID userB) {
+        return contactService.isBlockedEitherWay(userA, userB);
+    }
 }

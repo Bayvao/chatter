@@ -23,4 +23,18 @@ public interface RelationshipDirectory {
      * is not a friendship.
      */
     boolean areConnected(UUID userA, UUID userB);
+
+    /**
+     * Whether a block stands between two users, in either direction.
+     *
+     * <p>Called by {@code MessageService.send} for every 1:1 message. Blocking
+     * silences an existing conversation both ways — the blocked party must not
+     * be able to keep talking, and the blocker should not be able to either
+     * while the bar stands.
+     *
+     * <p>Separate from {@link #areConnected} because it is the narrower and
+     * cheaper question, and because the answers differ: un-friending someone
+     * leaves an existing conversation usable, blocking them does not.
+     */
+    boolean isBlockedEitherWay(UUID userA, UUID userB);
 }

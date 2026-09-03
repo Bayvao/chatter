@@ -2,7 +2,9 @@ package com.chatter.chatter.chat.websocket;
 
 import java.security.Principal;
 
+import org.springframework.messaging.handler.annotation.MessageExceptionHandler;
 import org.springframework.messaging.handler.annotation.MessageMapping;
+import org.springframework.messaging.simp.annotation.SendToUser;
 import org.springframework.messaging.handler.annotation.Payload;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
@@ -12,6 +14,7 @@ import jakarta.validation.Valid;
 
 import com.chatter.chatter.chat.dto.SendMessageRequest;
 import com.chatter.chatter.chat.service.MessageService;
+import com.chatter.chatter.common.exception.ApplicationException;
 import com.chatter.chatter.user.security.AuthenticatedUser;
 
 /**
@@ -59,6 +62,30 @@ public class ChatWebSocketController {
      *
      * @throws AccessDeniedException if the session carries no authenticated user
      */
+    /**
+     * Turns a refused send into a message on the caller's error queue.
+     *
+     * <p>Without this, an exception from {@code @MessageMapping} becomes a
+     * STOMP ERROR frame and Spring closes the session — the client sees a
+     * dropped connection and no reason for it.
+     *
+     * <p>That matters most for blocking. The party who was blocked is never
+     * told so directly, and {@code GET /me/blocked} only reports blocks they
+     * hold themselves, so this reply is the only way their client can explain
+     * why the message did not send.
+     *
+     * @return the failure, delivered to {@code /user/queue/errors}
+     */
+    @MessageExceptionHandler(ApplicationException.class)
+    @SendToUser("/queue/errors")
+    public ErrorPayload onApplicationException(ApplicationException e) {
+        return new ErrorPayload(e.getStatus().value(), e.getMessage());
+    }
+
+    /** What the client receives on {@code /user/queue/errors}. */
+    public record ErrorPayload(int status, String message) {
+    }
+
     private AuthenticatedUser requirePrincipal(Principal principal) {
         if (principal instanceof UsernamePasswordAuthenticationToken token
                 && token.getPrincipal() instanceof AuthenticatedUser user) {

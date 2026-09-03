@@ -12,14 +12,22 @@ export const useContactStore = create((set, get) => ({
   contacts: [],
   incoming: [],
   outgoing: [],
+  /** Ids of people this user has blocked, so the UI can explain a refused send. */
+  blocked: [],
 
   async loadAll() {
-    const [contacts, incoming, outgoing] = await Promise.all([
+    const [contacts, incoming, outgoing, blocked] = await Promise.all([
       api.get('/api/users/me/contacts'),
       api.get('/api/users/me/contacts/requests'),
       api.get('/api/users/me/contacts/requests/sent'),
+      api.get('/api/users/me/blocked'),
     ]);
-    set({ contacts: contacts.data, incoming: incoming.data, outgoing: outgoing.data });
+    set({
+      contacts: contacts.data,
+      incoming: incoming.data,
+      outgoing: outgoing.data,
+      blocked: blocked.data,
+    });
   },
 
   /**
@@ -51,6 +59,19 @@ export const useContactStore = create((set, get) => ({
     await get().loadAll();
   },
 
+  async unblock(userId) {
+    await api.delete(`/api/users/me/contacts/${userId}/block`);
+    await get().loadAll();
+  },
+
+  /**
+   * Whether this client blocked the user. A block held against us is not
+   * visible here by design — the server never tells the blocked party.
+   */
+  isBlocked(userId) {
+    return get().blocked.includes(userId);
+  },
+
   /**
    * Applied to every frame on /user/queue/contacts.
    *
@@ -73,6 +94,6 @@ export const useContactStore = create((set, get) => ({
   },
 
   reset() {
-    set({ contacts: [], incoming: [], outgoing: [] });
+    set({ contacts: [], incoming: [], outgoing: [], blocked: [] });
   },
 }));

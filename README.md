@@ -92,6 +92,7 @@ including both WebSocket authorization refusals.
 | `GET` | `/api/users/me/contacts/requests/sent` | Requests you have sent |
 | `POST` | `/api/users/me/contacts/{userId}/accept` | Accept a request |
 | `DELETE` | `/api/users/me/contacts/{userId}/decline` | Decline, or cancel your own |
+| `GET` | `/api/users/me/blocked` | Users you have blocked |
 | `GET` | `/api/presence/{userId}` | Online flag and last seen |
 | `GET` | `/api/presence?userIds=a,b` | The same, in bulk |
 | `GET` | `/api/push/public-key` | VAPID public key, and whether push is on |
@@ -132,8 +133,28 @@ and the REST lists above remain the source of truth on load. **Blocking is never
 relayed to the person blocked** — telling someone they were blocked hands a
 harasser the signal that their target acted.
 
-Blocking someone keeps that block even if they remove you as a contact: a block
-must not be clearable by the person blocked.
+### Blocking
+
+A block bars contact outright, in **both directions**, until it is lifted:
+neither party can send in an existing conversation, open a new one, or send a
+friend request, and each disappears from the other's search results.
+
+Blocks live in `app_user.blocks`, not as a flag on the contact row. The flag
+conflated two things with different lifetimes — an address-book entry is mutual
+and disposable, a ban is one-directional and must outlive everything — so
+removing a contact silently discarded the block, and a stranger could not be
+blocked at all. Now removing a contact leaves the block untouched, and anyone
+can be blocked whether or not you ever added them.
+
+Blocking does not delete the friendship or the conversation; unblocking
+restores both. **Existing history stays readable** — blocking stops new contact
+rather than seizing back what someone was already shown.
+
+The person blocked is never told. `GET /me/blocked` reports only blocks you
+hold yourself, and search hides both directions so a blocked user cannot find
+their way back to a request button. A send they attempt is refused with a
+message on `/user/queue/errors`, which is how their client explains the failure
+without disclosing who acted.
 
 ### Leaving a chat
 

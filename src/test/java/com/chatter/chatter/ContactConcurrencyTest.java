@@ -56,6 +56,7 @@ class ContactConcurrencyTest {
 
     @BeforeEach
     void setUp() {
+        jdbcTemplate.execute("DELETE FROM app_user.blocks");
         jdbcTemplate.execute("DELETE FROM app_user.contact_requests");
         jdbcTemplate.execute("DELETE FROM app_user.contacts");
         jdbcTemplate.execute("DELETE FROM chat.messages");

@@ -2,6 +2,7 @@ package com.chatter.chatter.chat.service;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 import org.springframework.data.domain.PageRequest;
@@ -105,6 +106,23 @@ public class ChatService {
         participantRepository.findByChatIdAndUserId(chat.getId(), userId)
                 .ifPresent(ChatParticipant::rejoin);
         return chat;
+    }
+
+    /**
+     * The other participant in a direct chat, if there is exactly one.
+     *
+     * <p>Used by {@code MessageService.send} to find who a 1:1 message is
+     * actually going to, so the block between them can be checked. Empty for a
+     * group, which has no single counterpart and is deliberately not gated on
+     * any relationship.
+     */
+    public Optional<UUID> otherParticipant(UUID chatId, UUID userId) {
+        List<UUID> others = participantRepository.findByChatIdAndLeftAtIsNull(chatId).stream()
+                .map(ChatParticipant::getUserId)
+                .filter(id -> !id.equals(userId))
+                .toList();
+
+        return others.size() == 1 ? Optional.of(others.get(0)) : Optional.empty();
     }
 
     /**

@@ -26,10 +26,17 @@ export default function ChatWindow() {
     selectChat,
     reset,
   } = useChatStore();
-  const { loadAll: loadContacts, receiveEvent, reset: resetContacts } = useContactStore();
+  const {
+    loadAll: loadContacts,
+    receiveEvent,
+    reset: resetContacts,
+    isBlocked,
+    unblock,
+  } = useContactStore();
   const bottomRef = useRef(null);
   const [sidebarTab, setSidebarTab] = useState('chats');
   const [showProfile, setShowProfile] = useState(false);
+  const [sendError, setSendError] = useState(null);
 
   useEffect(() => {
     loadChats();
@@ -43,6 +50,7 @@ export default function ChatWindow() {
         // Friend requests land here without a reload; the REST lists loaded
         // below remain the source of truth for anything missed while away.
         websocket.subscribeToContacts(receiveEvent);
+        websocket.subscribeToErrors((payload) => setSendError(payload.message));
       },
       // The socket drops silently; this is where anything sent in the gap is
       // recovered. Cursors are read at fire time, not closed over.
@@ -94,6 +102,10 @@ export default function ChatWindow() {
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
+
+  // A refusal belongs to the conversation it happened in; carrying it into the
+  // next one would blame the wrong chat.
+  useEffect(() => setSendError(null), [activeChatId]);
 
   const activeChat = chats.find((chat) => chat.id === activeChatId);
 
@@ -170,7 +182,32 @@ export default function ChatWindow() {
                 <div ref={bottomRef} />
               </div>
 
-              <MessageInput chatId={activeChatId} disabled={loadingMessages} />
+              {/*
+                A block bars sending in both directions, so the composer is
+                replaced rather than left to fail. Only a block we hold can be
+                shown — the server never reveals one held against us, so that
+                case surfaces as an error on send instead.
+              */}
+              {activeChat?.otherUserId && isBlocked(activeChat.otherUserId) ? (
+                <div className="blocked-notice">
+                  <span>You blocked this person. Unblock to send messages.</span>
+                  <button type="button" onClick={() => unblock(activeChat.otherUserId)}>
+                    Unblock
+                  </button>
+                </div>
+              ) : (
+                <>
+                  {sendError && (
+                    <div className="blocked-notice">
+                      <span>{sendError}</span>
+                      <button type="button" onClick={() => setSendError(null)}>
+                        Dismiss
+                      </button>
+                    </div>
+                  )}
+                  <MessageInput chatId={activeChatId} disabled={loadingMessages} />
+                </>
+              )}
             </>
           )}
         </main>

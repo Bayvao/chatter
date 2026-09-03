@@ -2,6 +2,7 @@ package com.chatter.chatter.user.service;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 import org.springframework.context.ApplicationEventPublisher;
@@ -16,9 +17,11 @@ import com.chatter.chatter.user.exception.ContactAlreadyExistsException;
 import com.chatter.chatter.user.exception.ContactBlockedException;
 import com.chatter.chatter.user.exception.ContactNotFoundException;
 import com.chatter.chatter.user.exception.ContactRequestNotFoundException;
+import com.chatter.chatter.user.model.Block;
 import com.chatter.chatter.user.model.Contact;
 import com.chatter.chatter.user.model.ContactPair;
 import com.chatter.chatter.user.model.ContactRequest;
+import com.chatter.chatter.user.repository.BlockRepository;
 import com.chatter.chatter.user.repository.ContactRepository;
 import com.chatter.chatter.user.repository.ContactRequestRepository;
 
@@ -40,15 +43,17 @@ public class ContactService {
 
     private final ContactRepository contactRepository;
     private final ContactRequestRepository requestRepository;
+    private final BlockRepository blockRepository;
     private final ContactWriter writer;
     private final UserService userService;
     private final ApplicationEventPublisher eventPublisher;
 
     public ContactService(ContactRepository contactRepository, ContactRequestRepository requestRepository,
-                           ContactWriter writer, UserService userService,
+                           BlockRepository blockRepository, ContactWriter writer, UserService userService,
                            ApplicationEventPublisher eventPublisher) {
         this.contactRepository = contactRepository;
         this.requestRepository = requestRepository;
+        this.blockRepository = blockRepository;
         this.writer = writer;
         this.userService = userService;
         this.eventPublisher = eventPublisher;
@@ -86,8 +91,10 @@ public class ContactService {
         if (contactRepository.existsByUserIdAndContactUserId(requesterId, recipientId)) {
             throw new ContactAlreadyExistsException();
         }
-        // Read on the recipient's own row: they blocked us, not the reverse.
-        if (isBlockedBy(recipientId, requesterId)) {
+        // Either direction: they blocked us, or we blocked them and have not
+        // lifted it. Asking to connect with someone you have barred is
+        // incoherent, and unblocking first makes the intent explicit.
+        if (blockRepository.existsEitherWay(requesterId, recipientId)) {
             throw new ContactBlockedException();
         }
 
@@ -184,40 +191,56 @@ public class ContactService {
         if (!contactRepository.existsByUserIdAndContactUserId(userId, contactUserId)) {
             throw new ContactNotFoundException(contactUserId);
         }
+        // Both sides go, since a friendship is mutual. Any block between them
+        // survives untouched: it lives in its own table now, precisely so
+        // removing a contact cannot clear the bar that keeps them away.
         contactRepository.deleteByUserIdAndContactUserId(userId, contactUserId);
-        // The other side goes too, since a friendship is mutual — unless they
-        // blocked us. A block must not be clearable by the person blocked, so
-        // that row stays and keeps them out of our search results and requests.
-        if (!isBlockedBy(contactUserId, userId)) {
-            contactRepository.deleteByUserIdAndContactUserId(contactUserId, userId);
-        }
+        contactRepository.deleteByUserIdAndContactUserId(contactUserId, userId);
 
         eventPublisher.publishEvent(
                 ContactChanged.to(contactUserId, ContactChanged.Type.REMOVED, userId, contactUserId));
     }
 
     /**
-     * Blocks or unblocks a contact.
+     * Blocks or unblocks another user.
      *
-     * <p>Used by {@code UserController.setBlocked}. Hides them from the caller's
-     * contact list and search results, and stops them sending a new request. The
-     * row survives so unblocking restores it.
+     * <p>Used by {@code UserController.setBlocked}. A block bars contact
+     * outright: neither party can message the other in an existing
+     * conversation, open a new one, or send a friend request, and each
+     * disappears from the other's search results, until it is lifted.
+     *
+     * <p>No contact row is required. Blocking someone who only ever messaged
+     * you is the case that matters most, and it was impossible while the flag
+     * lived on a contact row that did not exist.
+     *
+     * <p>Blocking does not delete the friendship or the conversation. Lifting
+     * the block restores both, which is what makes it safe to use.
      *
      * <p>The event goes to the caller's own sessions only — never to the person
      * blocked. Telling someone they have been blocked hands a harasser the
      * signal that their target acted, which is the thing blocking exists to
      * prevent.
-     *
-     * @throws ContactNotFoundException if they are not a contact
      */
     @Transactional
-    public void setBlocked(UUID userId, UUID contactUserId, boolean blocked) {
-        Contact contact = contactRepository.findByUserIdAndContactUserId(userId, contactUserId)
-                .orElseThrow(() -> new ContactNotFoundException(contactUserId));
-        contact.setBlocked(blocked);
+    public void setBlocked(UUID userId, UUID blockedUserId, boolean blocked) {
+        if (userId.equals(blockedUserId)) {
+            throw new IllegalArgumentException("Cannot block yourself");
+        }
+        // Throws UserNotFoundException if the target does not exist.
+        userService.getById(blockedUserId);
+
+        if (blocked) {
+            // Idempotent: blocking twice is the same state, not an error.
+            if (!blockRepository.findByBlockerIdAndBlockedId(userId, blockedUserId).isPresent()) {
+                blockRepository.save(new Block(userId, blockedUserId));
+            }
+        } else {
+            blockRepository.findByBlockerIdAndBlockedId(userId, blockedUserId)
+                    .ifPresent(blockRepository::delete);
+        }
 
         eventPublisher.publishEvent(
-                ContactChanged.to(userId, ContactChanged.Type.BLOCKED, userId, contactUserId));
+                ContactChanged.to(userId, ContactChanged.Type.BLOCKED, userId, blockedUserId));
     }
 
     /**
@@ -242,7 +265,10 @@ public class ContactService {
      * just not listed.
      */
     public List<ContactDTO> listContacts(UUID userId) {
-        return contactRepository.findByUserIdAndBlockedFalseOrderByAddedAtDesc(userId).stream()
+        Set<UUID> hidden = Set.copyOf(blockRepository.findAllInvolvedWith(userId));
+
+        return contactRepository.findByUserIdOrderByAddedAtDesc(userId).stream()
+                .filter(contact -> !hidden.contains(contact.getContactUserId()))
                 .map(contact -> ContactDTO.from(contact, userService.getById(contact.getContactUserId())))
                 .toList();
     }
@@ -277,23 +303,52 @@ public class ContactService {
      * Whether two users may open a direct chat.
      *
      * <p>Called through {@code RelationshipDirectory} by the chat module. Both
-     * rows must exist and neither side may have blocked the other: a friendship
-     * is mutual, and a half-deleted or blocked one is not a licence to start a
-     * conversation.
+     * contact rows must exist and no block may stand in either direction: a
+     * friendship is mutual, and a half-deleted or blocked one is not a licence
+     * to start a conversation.
      */
     public boolean areConnected(UUID userA, UUID userB) {
-        return contactRepository.findByUserIdAndContactUserId(userA, userB)
-                .filter(contact -> !contact.isBlocked())
-                .flatMap(contact -> contactRepository.findByUserIdAndContactUserId(userB, userA))
-                .filter(contact -> !contact.isBlocked())
-                .isPresent();
+        return contactRepository.existsByUserIdAndContactUserId(userA, userB)
+                && contactRepository.existsByUserIdAndContactUserId(userB, userA)
+                && !blockRepository.existsEitherWay(userA, userB);
     }
 
     /**
-     * The ids this user has blocked, for filtering them out of search results.
+     * Whether a block stands between two users, in either direction.
+     *
+     * <p>The gate on every 1:1 message send, reached through
+     * {@code RelationshipDirectory}. Separate from {@link #areConnected}
+     * because it answers a narrower question more cheaply — one indexed query
+     * rather than two contact reads — and because blocking bars an existing
+     * conversation, whereas merely un-friending someone does not.
+     */
+    public boolean isBlockedEitherWay(UUID userA, UUID userB) {
+        return blockRepository.existsEitherWay(userA, userB);
+    }
+
+    /**
+     * Everyone hidden from this user's search results.
+     *
+     * <p>Both directions: people they blocked, and people who blocked them.
+     * Showing the latter would hand a blocked user a route back to a profile
+     * and a request button.
      */
     public List<UUID> blockedIds(UUID userId) {
-        return contactRepository.findBlockedContactIds(userId);
+        return blockRepository.findAllInvolvedWith(userId);
+    }
+
+    /**
+     * Everyone <em>this user</em> has blocked.
+     *
+     * <p>Backs {@code GET /me/blocked}, so the client can explain a refused
+     * send and offer an Unblock button.
+     *
+     * <p>Deliberately one-directional, unlike {@link #blockedIds}: telling a
+     * client who has blocked <em>them</em> would hand a harasser the signal
+     * that their target acted, which is the thing blocking exists to prevent.
+     */
+    public List<UUID> blockedByMe(UUID userId) {
+        return blockRepository.findBlockedIdsBy(userId);
     }
 
     /** The outstanding request between two users, whichever way it points. */
@@ -302,10 +357,4 @@ public class ContactService {
                 .orElseThrow(() -> new ContactRequestNotFoundException(otherUserId));
     }
 
-    /** Whether {@code ownerId} has blocked {@code otherId}. */
-    private boolean isBlockedBy(UUID ownerId, UUID otherId) {
-        return contactRepository.findByUserIdAndContactUserId(ownerId, otherId)
-                .map(Contact::isBlocked)
-                .orElse(false);
-    }
 }

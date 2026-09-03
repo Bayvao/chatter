@@ -229,6 +229,20 @@ public class UserController {
     }
 
     /**
+     * The users the caller has blocked.
+     *
+     * <p>Lets the client replace the composer with an explanation and an
+     * Unblock button, rather than letting the send fail silently.
+     *
+     * <p>Only the caller's own blocks. Who has blocked <em>them</em> is never
+     * disclosed — that is the whole point of blocking being silent.
+     */
+    @GetMapping("/me/blocked")
+    public List<UUID> blockedUsers(@AuthenticationPrincipal AuthenticatedUser principal) {
+        return contactService.blockedByMe(principal.id());
+    }
+
+    /**
      * Marks a contact as a favourite.
      *
      * <p>A display hint only — favourites sort first. Grants nothing and hides
