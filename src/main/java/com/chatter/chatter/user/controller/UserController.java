@@ -19,6 +19,7 @@ import org.springframework.web.bind.annotation.RestController;
 import jakarta.validation.Valid;
 
 import com.chatter.chatter.user.dto.ContactDTO;
+import com.chatter.chatter.user.dto.ContactRequestDTO;
 import com.chatter.chatter.user.dto.ProfileDTO;
 import com.chatter.chatter.user.dto.UpdateProfileRequest;
 import com.chatter.chatter.user.dto.UserDTO;
@@ -118,26 +119,81 @@ public class UserController {
     }
 
     /**
-     * Saves someone to the caller's contacts.
+     * Sends a friend request.
      *
-     * <p>Used by "Add contact" beside a search result. Returns 409 if they are
-     * already saved, which the frontend deliberately ignores — the button is
-     * fire-and-forget.
+     * <p>Used by "Add friend" beside a search result. This no longer creates a
+     * contact outright — the two only become contacts once the recipient
+     * accepts, which is what stops a chat opening the instant a request is sent.
      *
-     * @return 201 when the contact is created
+     * @return 201 when a request is created, or 200 when it completed a request
+     *         that was already coming the other way and the two are now contacts
+     * @throws com.chatter.chatter.user.exception.ContactAlreadyExistsException
+     *         409, already contacts or already asked
+     * @throws com.chatter.chatter.user.exception.ContactBlockedException
+     *         403, the recipient has blocked the caller
      */
     @PostMapping("/me/contacts/{userId}")
-    public ResponseEntity<Void> addContact(@AuthenticationPrincipal AuthenticatedUser principal,
-                                            @PathVariable UUID userId) {
-        contactService.addContact(principal.id(), userId);
-        return ResponseEntity.status(201).build();
+    public ResponseEntity<Void> sendRequest(@AuthenticationPrincipal AuthenticatedUser principal,
+                                             @PathVariable UUID userId) {
+        boolean pending = contactService.sendRequest(principal.id(), userId).isPresent();
+        return ResponseEntity.status(pending ? 201 : 200).build();
     }
 
     /**
-     * Forgets a contact entirely.
+     * Requests waiting on the caller's decision.
      *
-     * <p>Distinct from blocking: this deletes the row, so the person reappears
-     * in search. Blocking keeps them saved and suppressed.
+     * <p>Backs the Requests section of the Contacts tab. The REST source of
+     * truth: the live relay on {@code /user/queue/contacts} only saves a poll,
+     * and drops entirely if the recipient was offline when it arrived.
+     */
+    @GetMapping("/me/contacts/requests")
+    public List<ContactRequestDTO> incomingRequests(@AuthenticationPrincipal AuthenticatedUser principal) {
+        return contactService.incomingRequests(principal.id());
+    }
+
+    /**
+     * Requests the caller has sent and not yet had answered.
+     *
+     * <p>Lets a search result render "Requested" rather than offering to send a
+     * second request that would only be refused.
+     */
+    @GetMapping("/me/contacts/requests/sent")
+    public List<ContactRequestDTO> outgoingRequests(@AuthenticationPrincipal AuthenticatedUser principal) {
+        return contactService.outgoingRequests(principal.id());
+    }
+
+    /**
+     * Accepts a request, making the two of them contacts.
+     *
+     * <p>Both rows are written in one transaction, so the friendship is mutual
+     * the moment it exists and either side can open the chat.
+     */
+    @PostMapping("/me/contacts/{userId}/accept")
+    public ResponseEntity<Void> acceptRequest(@AuthenticationPrincipal AuthenticatedUser principal,
+                                               @PathVariable UUID userId) {
+        contactService.acceptRequest(principal.id(), userId);
+        return ResponseEntity.noContent().build();
+    }
+
+    /**
+     * Declines a request addressed to the caller, or cancels one they sent.
+     *
+     * <p>One route for both: the row goes either way, and the caller is a party
+     * to it in both directions.
+     */
+    @DeleteMapping("/me/contacts/{userId}/decline")
+    public ResponseEntity<Void> declineRequest(@AuthenticationPrincipal AuthenticatedUser principal,
+                                                @PathVariable UUID userId) {
+        contactService.declineRequest(principal.id(), userId);
+        return ResponseEntity.noContent().build();
+    }
+
+    /**
+     * Ends a friendship, from both sides.
+     *
+     * <p>Distinct from blocking: this deletes both rows, so the person reappears
+     * in search and either of them may request again. Blocking keeps them saved
+     * and suppressed.
      */
     @DeleteMapping("/me/contacts/{userId}")
     public ResponseEntity<Void> removeContact(@AuthenticationPrincipal AuthenticatedUser principal,

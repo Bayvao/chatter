@@ -24,6 +24,7 @@ Feature: User profiles
 
   Scenario: Updating a display name refreshes the sender snapshot on past messages
     Given "bob" is a registered user
+    And "alice" and "bob" are contacts
     And "alice" has opened a chat with "bob"
     And "alice" sends "before the rename" to the chat
     When "alice" updates their display name to "Alice" "Anderson"

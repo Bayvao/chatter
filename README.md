@@ -80,12 +80,18 @@ including both WebSocket authorization refusals.
 | `GET` | `/api/auth/me` | The signed-in user |
 | `GET` | `/api/users/search?q=` | Find someone to chat with |
 | `GET` | `/api/chats` | Conversations, with unread counts |
+| `DELETE` | `/api/chats/{chatId}` | Leave a conversation |
 | `POST` | `/api/chats/with/{userId}` | Open (or reuse) a direct chat |
 | `GET` | `/api/chats/{chatId}/messages` | History, newest first |
 | `GET` | `/api/chats/{chatId}/messages/since?afterSeq=` | Reconnect sync |
 | `POST` | `/api/chats/messages` | Send without a live socket |
 | `POST` | `/api/chats/{chatId}/messages/{messageId}/read` | Mark read |
 | `DELETE` | `/api/chats/{chatId}/messages/{messageId}` | Soft delete |
+| `POST` | `/api/users/me/contacts/{userId}` | Send a friend request |
+| `GET` | `/api/users/me/contacts/requests` | Incoming requests |
+| `GET` | `/api/users/me/contacts/requests/sent` | Requests you have sent |
+| `POST` | `/api/users/me/contacts/{userId}/accept` | Accept a request |
+| `DELETE` | `/api/users/me/contacts/{userId}/decline` | Decline, or cancel your own |
 | `GET` | `/api/presence/{userId}` | Online flag and last seen |
 | `GET` | `/api/presence?userIds=a,b` | The same, in bulk |
 | `GET` | `/api/push/public-key` | VAPID public key, and whether push is on |
@@ -102,6 +108,43 @@ STOMP `CONNECT` frame, and `SUBSCRIBE` is checked for chat membership.
 | `/app/sync.start` | `{cursors: {chatId: seq}}` — catch up after a drop |
 | `/user/queue/sync-batch` | Missed messages, 50 per frame |
 | `/user/queue/sync-complete` | `{messageCount}` when the backfill is done |
+| `/user/queue/contacts` | Friend requests, accepts, declines and removals |
+
+### Friend requests
+
+A chat cannot be opened with a stranger. `POST /api/chats/with/{userId}` returns
+403 unless the two are accepted contacts, which is enforced through the
+`RelationshipDirectory` port rather than by the chat module reading contacts
+directly.
+
+Pending requests live in their own table keyed by the **unordered pair**, so a
+plain `UNIQUE` constraint guarantees one request per pair whichever direction it
+came from. Two consequences fall out of that:
+
+- Two people clicking "Add friend" on each other at the same instant become
+  contacts, rather than one of them failing arbitrarily — the loser of the
+  constraint race sees the reciprocal request and accepts it.
+- Clicking twice yourself is a 409, not a duplicate.
+
+Changes relay live on `/user/queue/contacts`, so a request appears without a
+reload. Delivery is best effort: a user destination with nobody connected drops,
+and the REST lists above remain the source of truth on load. **Blocking is never
+relayed to the person blocked** — telling someone they were blocked hands a
+harasser the signal that their target acted.
+
+Blocking someone keeps that block even if they remove you as a contact: a block
+must not be clearable by the person blocked.
+
+### Leaving a chat
+
+`DELETE /api/chats/{chatId}` stamps `left_at` on your participant row. That one
+write is the whole behaviour, because every membership query already filters on
+it — the chat leaves your list, sends and history return 403, STOMP SUBSCRIBE is
+refused, and the broadcaster stops delivering to you.
+
+It hides rather than deletes. Messages and your read cursor survive, so opening
+a chat with the same person **rejoins the original conversation** rather than
+forking a second one alongside it.
 
 ### Presence, delivery status and catch-up
 
@@ -153,6 +196,7 @@ works unchanged and `LoggingPushSender` logs what it would have sent.
 ## Next
 
 Phases 1–3 are in: auth, direct chat, real-time delivery, profiles, contacts
-and search, then presence, delivery status, reconnect sync and Web Push.
+and search, then presence, delivery status, reconnect sync and Web Push, plus
+friend requests and leaving a chat.
 Partitioning, the transactional outbox and Kafka arrive in Phases 3.5 and 5 —
 the schema and event shapes here are already aligned with them.

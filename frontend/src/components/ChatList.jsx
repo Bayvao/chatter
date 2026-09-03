@@ -1,10 +1,12 @@
 import { useState } from 'react';
 import api from '../services/api';
 import { useChatStore } from '../store/chatStore';
+import { useContactStore } from '../store/contactStore';
 import PresenceDot from './PresenceDot';
 
 export default function ChatList() {
-  const { chats, activeChatId, presence, selectChat, openChatWith } = useChatStore();
+  const { chats, activeChatId, presence, selectChat, openChatWith, leaveChat } = useChatStore();
+  const { sendRequest, isContact, hasRequested } = useContactStore();
   const [query, setQuery] = useState('');
   const [results, setResults] = useState([]);
   const [searching, setSearching] = useState(false);
@@ -29,10 +31,9 @@ export default function ChatList() {
     setResults([]);
   };
 
-  const addContact = async (userId) => {
-    // 409 just means they are already a contact, which is not worth surfacing.
-    await api.post(`/api/users/me/contacts/${userId}`).catch(() => {});
-    setResults(results.filter((user) => user.id !== userId));
+  const request = async (userId) => {
+    // 409 means the request already exists, which is not worth surfacing.
+    await sendRequest(userId).catch(() => {});
   };
 
   return (
@@ -53,13 +54,31 @@ export default function ChatList() {
         <ul className="search-results">
           {results.map((user) => (
             <li key={user.id}>
-              <button type="button" onClick={() => startChat(user.id)}>
-                {user.displayName}
-                <span className="muted"> @{user.username}</span>
-              </button>
-              <button type="button" className="link add-contact" onClick={() => addContact(user.id)}>
-                Add contact
-              </button>
+              {/*
+                A chat can only be opened with an accepted contact — the server
+                refuses otherwise. So the name is a button only once you are
+                connected; before that the row offers a request instead.
+              */}
+              {isContact(user.id) ? (
+                <button type="button" onClick={() => startChat(user.id)}>
+                  {user.displayName}
+                  <span className="muted"> @{user.username}</span>
+                </button>
+              ) : (
+                <span className="search-name">
+                  {user.displayName}
+                  <span className="muted"> @{user.username}</span>
+                </span>
+              )}
+
+              {!isContact(user.id) &&
+                (hasRequested(user.id) ? (
+                  <span className="muted requested">Requested</span>
+                ) : (
+                  <button type="button" className="link add-contact" onClick={() => request(user.id)}>
+                    Add friend
+                  </button>
+                ))}
             </li>
           ))}
         </ul>
@@ -82,6 +101,14 @@ export default function ChatList() {
               </div>
               <div className="chat-preview">{chat.lastMessage ?? 'No messages yet'}</div>
               {chat.unreadCount > 0 && <span className="badge">{chat.unreadCount}</span>}
+            </button>
+            <button
+              type="button"
+              className="link leave-chat"
+              title="Leave this conversation"
+              onClick={() => leaveChat(chat.id)}
+            >
+              Leave
             </button>
           </li>
         ))}

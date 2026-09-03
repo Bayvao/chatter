@@ -80,6 +80,31 @@ public class ChatParticipant {
     }
 
     /**
+     * Removes this member from the chat without deleting their row.
+     *
+     * <p>Called via {@code ChatService.leaveChat}. Every membership query
+     * filters on {@code left_at is null}, so stamping it is all that is needed
+     * to stop delivery, refuse sends and hide the chat from their list.
+     *
+     * <p>The row stays because {@code last_read_seq} is on it: deleting would
+     * lose their read position and make every old message unread on rejoin.
+     */
+    public void leave() {
+        leftAt = Instant.now();
+    }
+
+    /**
+     * Restores a member who had left.
+     *
+     * <p>Called from {@code ChatService.getOrCreateDirectChat} when someone
+     * reopens a conversation they left. Clearing the stamp rejoins the original
+     * chat rather than forking a second one, so neither side loses history.
+     */
+    public void rejoin() {
+        leftAt = null;
+    }
+
+    /**
      * The composite primary key: a user appears at most once per chat.
      *
      * <p>Required by JPA as a separate type for an {@code @IdClass}, and

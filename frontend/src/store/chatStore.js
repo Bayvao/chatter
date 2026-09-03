@@ -104,6 +104,20 @@ export const useChatStore = create((set, get) => ({
     messages.forEach((message) => get().receiveMessage(message));
   },
 
+  /**
+   * Leaves a conversation: it disappears from the list, and the server stops
+   * delivering its messages here. Reopening a chat with the same person rejoins
+   * this one rather than starting a second, so nothing is lost.
+   */
+  async leaveChat(chatId) {
+    await api.delete(`/api/chats/${chatId}`);
+    set((state) => ({
+      chats: state.chats.filter((chat) => chat.id !== chatId),
+      activeChatId: state.activeChatId === chatId ? null : state.activeChatId,
+      messages: state.activeChatId === chatId ? [] : state.messages,
+    }));
+  },
+
   reset() {
     set({
       chats: [],

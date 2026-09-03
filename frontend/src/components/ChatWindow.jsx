@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useAuthStore } from '../store/authStore';
 import { useChatStore } from '../store/chatStore';
+import { useContactStore } from '../store/contactStore';
 import websocket from '../services/websocket';
 import { disablePush, enablePush } from '../services/push';
 import ChatList from './ChatList';
@@ -25,18 +26,23 @@ export default function ChatWindow() {
     selectChat,
     reset,
   } = useChatStore();
+  const { loadAll: loadContacts, receiveEvent, reset: resetContacts } = useContactStore();
   const bottomRef = useRef(null);
   const [sidebarTab, setSidebarTab] = useState('chats');
   const [showProfile, setShowProfile] = useState(false);
 
   useEffect(() => {
     loadChats();
+    loadContacts();
 
     websocket.connect(token, {
       onConnect: () => {
         loadChats();
         websocket.subscribeToPresence(setPresence);
         websocket.subscribeToSync({ onBatch: receiveSyncBatch });
+        // Friend requests land here without a reload; the REST lists loaded
+        // below remain the source of truth for anything missed while away.
+        websocket.subscribeToContacts(receiveEvent);
       },
       // The socket drops silently; this is where anything sent in the gap is
       // recovered. Cursors are read at fire time, not closed over.
@@ -48,7 +54,7 @@ export default function ChatWindow() {
     enablePush();
 
     return () => websocket.disconnect();
-  }, [token, loadChats, receiveSyncBatch, setPresence]);
+  }, [token, loadChats, loadContacts, receiveEvent, receiveSyncBatch, setPresence]);
 
   // The service worker focuses this tab on a notification click and tells us
   // which conversation it was for.
@@ -97,6 +103,7 @@ export default function ChatWindow() {
     await disablePush();
     websocket.disconnect();
     reset();
+    resetContacts();
     logout();
   };
 
